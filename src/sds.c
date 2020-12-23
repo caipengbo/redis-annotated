@@ -1,32 +1,4 @@
-/* SDSLib, A C dynamic strings library
- *
- * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+// SDSLib(Simple Dynamic String), A C dynamic strings library
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,21 +8,6 @@
 #include "sds.h"
 #include "zmalloc.h"
 
-/*
- * 根据给定的初始化字符串 init 和字符串长度 initlen
- * 创建一个新的 sds
- *
- * 参数
- *  init ：初始化字符串指针
- *  initlen ：初始化字符串的长度
- *
- * 返回值
- *  sds ：创建成功返回 sdshdr 相对应的 sds
- *        创建失败返回 NULL
- *
- * 复杂度
- *  T = O(N)
- */
 /* Create a new sds string with the content specified by the 'init' pointer
  * and 'initlen'.
  * If NULL is used for 'init' the string is initialized with zero bytes.
@@ -63,14 +20,17 @@
  * You can print the string with printf() as there is an implicit \0 at the
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
+// 根据给定的初始化字符串 init 和字符串长度 initlen,创建一个新的 sdshdr 并返回其数据部分（内容）
+// 为什么要创建sdshdr？便于管理（有free和len属性）
 sds sdsnewlen(const void *init, size_t initlen) {
-
+    // 新的sdshdr
     struct sdshdr *sh;
 
     // 根据是否有初始化内容，选择适当的内存分配方式
-    // T = O(N)
     if (init) {
+        // 为sdshdr初始化
         // zmalloc 不初始化所分配的内存
+        // sizeof(struct sdshdr)指的是 len和free所占的大小，柔性数组不会被sizeof计算在内
         sh = zmalloc(sizeof(struct sdshdr)+initlen+1);
     } else {
         // zcalloc 将分配的内存全部初始化为 0
@@ -91,20 +51,12 @@ sds sdsnewlen(const void *init, size_t initlen) {
     // 以 \0 结尾
     sh->buf[initlen] = '\0';
 
-    // 返回 buf 部分，而不是整个 sdshdr
+    // 返回sdshdr的buf部分，而不是整个 sdshdr
     return (char*)sh->buf;
 }
 
-/*
- * 创建并返回一个只保存了空字符串 "" 的 sds
- *
- * 返回值
- *  sds ：创建成功返回 sdshdr 相对应的 sds
- *        创建失败返回 NULL
- *
- * 复杂度
- *  T = O(1)
- */
+
+// 创建并返回一个只保存了空字符串 "" 的 sds
 /* Create an empty (zero length) sds string. Even in this case the string
  * always has an implicit null term. */
 sds sdsempty(void) {
@@ -192,8 +144,7 @@ void sdsupdatelen(sds s) {
  * so that next append operations will not require allocations up to the
  * number of bytes previously available. */
 void sdsclear(sds s) {
-
-    // 取出 sdshdr
+    // 找到对应的 sdshdr
     struct sdshdr *sh = (void*) (s-(sizeof(struct sdshdr)));
 
     // 重新计算属性
@@ -211,16 +162,12 @@ void sdsclear(sds s) {
  * Note: this does not change the *length* of the sds string as returned
  * by sdslen(), but only the free buffer space we have. */
 /*
- * 对 sds 中 buf 的长度进行扩展，确保在函数执行之后，
- * buf 至少会有 addlen + 1 长度的空余空间
- * （额外的 1 字节是为 \0 准备的）
+ * 对 sds 中 buf 的长度进行扩展，确保在函数执行之后，buf 至少会有 addlen + 1 长度的空余空间（额外的 1 字节是为 \0 准备的）
+ * 如果free够，就不用重新分配空间，如果不够，需要重新分配空间（扩容机制）
  *
  * 返回值
  *  sds ：扩展成功返回扩展后的 sds
  *        扩展失败返回 NULL
- *
- * 复杂度
- *  T = O(N)
  */
 sds sdsMakeRoomFor(sds s, size_t addlen) {
 
@@ -240,15 +187,15 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
 
     // s 最少需要的长度
     newlen = (len+addlen);
-
+    // ===================== 扩容策略 =====================
     // 根据新长度，为 s 分配新空间所需的大小
-    if (newlen < SDS_MAX_PREALLOC)
-        // 如果新长度小于 SDS_MAX_PREALLOC 
+    if (newlen < SDS_MAX_PREALLOC) {
+        // 如果新长度小于 SDS_MAX_PREALLOC（最大预分配空间）
         // 那么为它分配两倍于所需长度的空间
         newlen *= 2;
-    else
-        // 否则，分配长度为目前长度加上 SDS_MAX_PREALLOC
+    } else { // 否则，分配长度为目前长度加上 SDS_MAX_PREALLOC
         newlen += SDS_MAX_PREALLOC;
+    }
     // T = O(N)
     newsh = zrealloc(sh, sizeof(struct sdshdr)+newlen+1);
 
@@ -284,7 +231,6 @@ sds sdsRemoveFreeSpace(sds s) {
     sh = (void*) (s-(sizeof(struct sdshdr)));
 
     // 进行内存重分配，让 buf 的长度仅仅足够保存字符串内容
-    // T = O(N)
     sh = zrealloc(sh, sizeof(struct sdshdr)+sh->len+1);
 
     // 空余空间为 0
@@ -323,9 +269,8 @@ size_t sdsAllocSize(sds s) {
  * user calls sdsMakeRoomFor(), writes something after the end of
  * the current string, and finally needs to set the new length.
  *
- * 这个函数是在调用 sdsMakeRoomFor() 对字符串进行扩展，
- * 然后用户在字符串尾部写入了某些内容之后，
- * 用来正确更新 free 和 len 属性的。
+ * 这个函数是在调用 sdsMakeRoomFor()、然后对字符串的内容增加之后，
+ * 更新 free 和 len 属性的。
  *
  * Note: it is possible to use a negative increment in order to
  * right-trim the string.

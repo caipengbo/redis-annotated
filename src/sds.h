@@ -39,41 +39,28 @@
 #include <sys/types.h>
 #include <stdarg.h>
 
-/*
- * 类型别名，用于指向 sdshdr 的 buf 属性
- */
+// 类型别名，sds 代表 char*
 typedef char *sds;
 
-/*
- * 保存字符串对象的结构
- */
+// simple dynamic string header 字符串对象的结构
 struct sdshdr {
-    
     // buf 中已占用空间的长度
     int len;
-
     // buf 中剩余可用空间的长度
     int free;
-
-    // 数据空间
-    char buf[];
+    // 数据
+    char buf[];  // 柔性数组不占空间
 };
 
-/*
- * 返回 sds 实际保存的字符串的长度
- *
- * T = O(1)
- */
+// 返回 sds 实际保存的字符串的长度
+// 如果存在sds数据结构，说明内存中一定有sdshdr数据结构
 static inline size_t sdslen(const sds s) {
+    // 找到sds对应的sdshdr，返回其len属性
     struct sdshdr *sh = (void*)(s-(sizeof(struct sdshdr)));
     return sh->len;
 }
 
-/*
- * 返回 sds 可用空间的长度
- *
- * T = O(1)
- */
+// 返回 sds 可用空间的长度
 static inline size_t sdsavail(const sds s) {
     struct sdshdr *sh = (void*)(s-(sizeof(struct sdshdr)));
     return sh->free;
