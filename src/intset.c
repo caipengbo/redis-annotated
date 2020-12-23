@@ -1,33 +1,4 @@
-/*
- * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-
+// integer set, for t_set
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,17 +10,17 @@
  * INTSET_ENC_INT16 < INTSET_ENC_INT32 < INTSET_ENC_INT64. */
 /*
  * intset 的编码方式
+ * 表示intset中的每个数据元素用几个字节来存储。
+ * 它有三种可能的取值：INTSET_ENC_INT16表示每个元素用2个字节存储，
+ * INTSET_ENC_INT32表示每个元素用4个字节存储，
+ * INTSET_ENC_INT64表示每个元素用8个字节存储。
+ * 因此，intset中存储的整数最多只能占用64bit。
  */
 #define INTSET_ENC_INT16 (sizeof(int16_t))
 #define INTSET_ENC_INT32 (sizeof(int32_t))
 #define INTSET_ENC_INT64 (sizeof(int64_t))
 
-/* Return the required encoding for the provided value. 
- *
- * 返回适用于传入值 v 的编码方式
- *
- * T = O(1)
- */
+// 返回适用于传入值 v 的编码方式
 static uint8_t _intsetValueEncoding(int64_t v) {
     if (v < INT32_MIN || v > INT32_MAX)
         return INTSET_ENC_INT64;
@@ -59,12 +30,7 @@ static uint8_t _intsetValueEncoding(int64_t v) {
         return INTSET_ENC_INT16;
 }
 
-/* Return the value at pos, given an encoding. 
- *
- * 根据给定的编码方式 enc ，返回集合的底层数组在 pos 索引上的元素。
- *
- * T = O(1)
- */
+//根据给定的编码方式 enc ，返回集合的底层数组在 pos 索引上的元素。
 static int64_t _intsetGetEncoded(intset *is, int pos, uint8_t enc) {
     int64_t v64;
     int32_t v32;
@@ -94,7 +60,6 @@ static int64_t _intsetGetEncoded(intset *is, int pos, uint8_t enc) {
  *
  * 根据集合的编码方式，返回底层数组在 pos 索引上的值
  *
- * T = O(1)
  */
 static int64_t _intsetGet(intset *is, int pos) {
     return _intsetGetEncoded(is,pos,intrev32ifbe(is->encoding));
@@ -104,7 +69,6 @@ static int64_t _intsetGet(intset *is, int pos) {
  *
  * 根据集合的编码方式，将底层数组在 pos 位置上的值设为 value 。
  *
- * T = O(1)
  */
 static void _intsetSet(intset *is, int pos, int64_t value) {
 
@@ -132,7 +96,6 @@ static void _intsetSet(intset *is, int pos, int64_t value) {
  *
  * 创建并返回一个新的空整数集合
  *
- * T = O(1)
  */
 intset *intsetNew(void) {
 
@@ -399,15 +362,12 @@ intset *intsetAdd(intset *is, int64_t value, uint8_t *success) {
     // 默认设置插入为成功
     if (success) *success = 1;
 
-    /* Upgrade encoding if necessary. If we need to upgrade, we know that
-     * this value should be either appended (if > 0) or prepended (if < 0),
-     * because it lies outside the range of existing values. */
+
     // 如果 value 的编码比整数集合现在的编码要大
     // 那么表示 value 必然可以添加到整数集合中
     // 并且整数集合需要对自身进行升级，才能满足 value 所需的编码
     if (valenc > intrev32ifbe(is->encoding)) {
         /* This always succeeds, so we don't need to curry *success. */
-        // T = O(N)
         return intsetUpgradeAndAdd(is,value);
     } else {
         // 运行到这里，表示整数集合现有的编码方式适用于 value

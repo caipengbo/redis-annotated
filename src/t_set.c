@@ -42,8 +42,7 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
  * When the object has an integer-encodable value, 
  * an intset will be returned. Otherwise a regular hash table. 
  *
- * 当对象的值可以被编码为整数时，返回 intset ，
- * 否则，返回普通的哈希表。
+ * 当对象的值可以被编码为整数时，返回 intset，否则，返回普通的哈希表。
  */
 robj *setTypeCreate(robj *value) {
 

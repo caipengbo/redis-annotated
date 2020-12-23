@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 
-project(redis-3.0-annotated-cmake VERSION 3.0)
+project(redis-3.0-annotated VERSION 3.0)
 
 if (NOT CMAKE_BUILD_TYPE)
     message(STATUS "No build type defined; defaulting to 'Debug'")

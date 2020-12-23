@@ -1,66 +1,19 @@
-/* Hash Tables Implementation.
- *
- * This file implements in-memory hash tables with insert/del/replace/find/
- * get-random-element operations. Hash tables will auto-resize if needed
- * tables of power of two in size are used, collisions are handled by
- * chaining. See the source code for more information... :)
- *
- * 这个文件实现了一个内存哈希表，
- * 它支持插入、删除、替换、查找和获取随机元素等操作。
- *
- * 哈希表会自动在表的大小的二次方之间进行调整。
- *
- * 键的冲突通过链表来解决。
- *
- * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-
+// Hash Tables Implementation.
 #include <stdint.h>
 
 #ifndef __DICT_H
 #define __DICT_H
 
-/*
- * 字典的操作状态
- */
-// 操作成功
-#define DICT_OK 0
-// 操作失败（或出错）
-#define DICT_ERR 1
+// 字典的操作状态
+#define DICT_OK 0  // 操作成功
+#define DICT_ERR 1  // 操作失败（或出错）
 
 /* Unused arguments generate annoying warnings... */
 // 如果字典的私有数据不使用时
 // 用这个宏来避免编译器错误
 #define DICT_NOTUSED(V) ((void) V)
 
-/*
- * 哈希表节点
- */
+// 哈希表节点
 typedef struct dictEntry {
     
     // 键
@@ -79,9 +32,8 @@ typedef struct dictEntry {
 } dictEntry;
 
 
-/*
- * 字典类型特定函数
- */
+// 字典类型特定函数
+// 将所有函数封装在一个struct中
 typedef struct dictType {
 
     // 计算哈希值的函数
@@ -109,19 +61,16 @@ typedef struct dictType {
  * implement incremental rehashing, for the old to the new table. */
 /*
  * 哈希表
- *
- * 每个字典都使用两个哈希表，从而实现渐进式 rehash 。
  */
 typedef struct dictht {
     
-    // 哈希表数组
+    // 哈希表数组（指针数组 dictEntry* table[]）
     dictEntry **table;
 
     // 哈希表大小
     unsigned long size;
     
-    // 哈希表大小掩码，用于计算索引值
-    // 总是等于 size - 1
+    // 哈希表大小掩码，用于计算索引值；总是等于 size - 1
     unsigned long sizemask;
 
     // 该哈希表已有节点的数量
@@ -129,21 +78,19 @@ typedef struct dictht {
 
 } dictht;
 
-/*
- * 字典
- */
+// 字典
 typedef struct dict {
 
     // 类型特定函数
     dictType *type;
 
-    // 私有数据
+    // 私有数据,保存了需要传给那些类型特定函数的可选参数
     void *privdata;
 
-    // 哈希表
+    // 哈希表,使用两个哈希表，从而实现渐进式 rehash
     dictht ht[2];
 
-    // rehash 索引
+    // rehash索引，目前rehash的进度
     // 当 rehash 不在进行时，值为 -1
     int rehashidx; /* rehashing not in progress if rehashidx == -1 */
 
@@ -158,12 +105,8 @@ typedef struct dict {
  * should be called while iterating. */
 /*
  * 字典迭代器
- *
- * 如果 safe 属性的值为 1 ，那么在迭代进行的过程中，
- * 程序仍然可以执行 dictAdd 、 dictFind 和其他函数，对字典进行修改。
- *
- * 如果 safe 不为 1 ，那么程序只会调用 dictNext 对字典进行迭代，
- * 而不对字典进行修改。
+ * 如果 safe 属性的值为 1 ，那么在迭代进行的过程中，程序仍然可以执行 dictAdd 、 dictFind 和其他函数，对字典进行修改。
+ * 如果 safe 不为 1 ，那么程序只会调用 dictNext 对字典进行迭代，而不对字典进行修改。
  */
 typedef struct dictIterator {
         
@@ -176,10 +119,8 @@ typedef struct dictIterator {
     int table, index, safe;
 
     // entry ：当前迭代到的节点的指针
-    // nextEntry ：当前迭代节点的下一个节点
-    //             因为在安全迭代器运作时， entry 所指向的节点可能会被修改，
-    //             所以需要一个额外的指针来保存下一节点的位置，
-    //             从而防止指针丢失
+    // nextEntry ：当前迭代节点的下一个节点，因为在安全迭代器运作时， entry所指向的节点可能会被修改，
+    // 所以需要一个额外的指针来保存下一节点的位置，从而防止指针丢失
     dictEntry *entry, *nextEntry;
 
     long long fingerprint; /* unsafe iterator fingerprint for misuse detection */
