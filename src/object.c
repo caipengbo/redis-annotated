@@ -1,46 +1,16 @@
-/* Redis Object implementation.
- *
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+// Redis Object implementation.
 
 #include "redis.h"
 #include <math.h>
 #include <ctype.h>
 
-/*
- * 创建一个新 robj 对象
- */
+// 创建一个新 robj 对象
 robj *createObject(int type, void *ptr) {
 
     robj *o = zmalloc(sizeof(*o));
 
     o->type = type;
-    o->encoding = REDIS_ENCODING_RAW;
+    o->encoding = REDIS_ENCODING_RAW;  // 默认是RAW编码方式
     o->ptr = ptr;
     o->refcount = 1;
 
@@ -49,21 +19,19 @@ robj *createObject(int type, void *ptr) {
     return o;
 }
 
-/* Create a string object with encoding REDIS_ENCODING_RAW, that is a plain
- * string object where o->ptr points to a proper sds string. */
 // 创建一个 REDIS_ENCODING_RAW 编码的字符对象
-// 对象的指针指向一个 sds 结构
+// 对象的指针指向一个 sds string
 robj *createRawStringObject(char *ptr, size_t len) {
+    // 涉及到两次内存分配(释放)，第一次：createObject中为robj分配；第二次：sdsnewlen中为sdshdr分配
     return createObject(REDIS_STRING,sdsnewlen(ptr,len));
 }
 
-/* Create a string object with encoding REDIS_ENCODING_EMBSTR, that is
- * an object where the sds string is actually an unmodifiable string
- * allocated in the same chunk as the object itself. */
-// 创建一个 REDIS_ENCODING_EMBSTR 编码的字符对象
+// 创建一个 REDIS_ENCODING_EMBSTR 编码的字符对象(该编码是专门保存短字符串的一种优化编码方式)
 // 这个字符串对象中的 sds 会和字符串对象的 redisObject 结构一起分配
 // 因此这个字符也是不可修改的
 robj *createEmbeddedStringObject(char *ptr, size_t len) {
+    // 仅需要一次内存分配（释放）
+    // 数据保存在连续的内存里，可以更好的利用缓存
     robj *o = zmalloc(sizeof(robj)+sizeof(struct sdshdr)+len+1);
     struct sdshdr *sh = (void*)(o+1);
 
@@ -90,6 +58,7 @@ robj *createEmbeddedStringObject(char *ptr, size_t len) {
  *
  * The current limit of 39 is chosen so that the biggest string object
  * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */
+// 小于REDIS_ENCODING_EMBSTR_SIZE_LIMIT会使用EMBSTR编码方式
 #define REDIS_ENCODING_EMBSTR_SIZE_LIMIT 39
 robj *createStringObject(char *ptr, size_t len) {
     if (len <= REDIS_ENCODING_EMBSTR_SIZE_LIMIT)
@@ -419,9 +388,7 @@ void incrRefCount(robj *o) {
 }
 
 /*
- * 为对象的引用计数减一
- *
- * 当对象的引用计数降为 0 时，释放对象。
+ * 为对象的引用计数减一，当对象的引用计数降为 0 时，释放对象。
  */
 void decrRefCount(robj *o) {
 
@@ -521,6 +488,9 @@ int isObjectRepresentableAsLongLong(robj *o, long long *llval) {
 
 /* Try to encode a string object in order to save space */
 // 尝试对字符串对象进行编码，以节约内存。
+// 是否可以转化成encoding_int?  是否可以转化成
+// 是否可以转化成encoding_emb?
+// 还是raw，就把free情况，释放内存
 robj *tryObjectEncoding(robj *o) {
     long value;
 
@@ -580,8 +550,8 @@ robj *tryObjectEncoding(robj *o) {
         robj *emb;
 
         if (o->encoding == REDIS_ENCODING_EMBSTR) return o;
-        emb = createEmbeddedStringObject(s,sdslen(s));
-        decrRefCount(o);
+        emb = createEmbeddedStringObject(s,sdslen(s));  // 创建新的robj
+        decrRefCount(o);  // 把以前的robj o 减少一次ref
         return emb;
     }
 
@@ -1045,7 +1015,7 @@ robj *objectCommandLookupOrReply(redisClient *c, robj *key, robj *reply) {
 void objectCommand(redisClient *c) {
     robj *o;
 
-    // 返回对戏哪个的引用计数
+    // 返回对象的引用计数
     if (!strcasecmp(c->argv[1]->ptr,"refcount") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
                 == NULL) return;

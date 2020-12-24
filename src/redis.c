@@ -787,7 +787,6 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
     if (now > t) {
 
         // 键已过期
-
         sds key = dictGetKey(de);
         robj *keyobj = createStringObject(key,sdslen(key));
 
@@ -1610,10 +1609,14 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
 
 /* =========================== Server initialization ======================== */
 
+// 创建共享对象
 void createSharedObjects(void) {
     int j;
 
-    // 常用回复
+    // 常用命令的回复
+    // // 这里的值都是要放到 Redis 输出缓冲区里面的，要返回给客户端的，所以都是按照 Redis 协议来赋值的
+    // 因为不可能每个用户请求一下，就在内存中创建一个新的对象，如果没有这种共享机制，
+    // 客户端发送大量的Ping，服务器创建大量的Pong回复，会把内存打满
     shared.crlf = createObject(REDIS_STRING,sdsnew("\r\n"));
     shared.ok = createObject(REDIS_STRING,sdsnew("+OK\r\n"));
     shared.err = createObject(REDIS_STRING,sdsnew("-ERR\r\n"));
@@ -1624,7 +1627,7 @@ void createSharedObjects(void) {
     shared.nullbulk = createObject(REDIS_STRING,sdsnew("$-1\r\n"));
     shared.nullmultibulk = createObject(REDIS_STRING,sdsnew("*-1\r\n"));
     shared.emptymultibulk = createObject(REDIS_STRING,sdsnew("*0\r\n"));
-    shared.pong = createObject(REDIS_STRING,sdsnew("+PONG\r\n"));
+    shared.pong = createObject(REDIS_STRING,sdsnew("+PONG\r\n"));   // Ping Pong
     shared.queued = createObject(REDIS_STRING,sdsnew("+QUEUED\r\n"));
     shared.emptyscan = createObject(REDIS_STRING,sdsnew("*2\r\n$1\r\n0\r\n*0\r\n"));
     // 常用错误回复
@@ -1692,7 +1695,7 @@ void createSharedObjects(void) {
     shared.lpop = createStringObject("LPOP",4);
     shared.lpush = createStringObject("LPUSH",5);
 
-    // 常用整数
+    // 常用整数（初始时，就已经将数组填满）
     for (j = 0; j < REDIS_SHARED_INTEGERS; j++) {
         shared.integers[j] = createObject(REDIS_STRING,(void*)(long)j);
         shared.integers[j]->encoding = REDIS_ENCODING_INT;
@@ -3558,6 +3561,7 @@ void evictionPoolPopulate(dict *sampledict, dict *keydict, struct evictionPoolEn
     if (samples != _samples) zfree(samples);
 }
 
+// 缓存淘汰机制，当内存使用到一定程度的时候，根据缓存淘汰机制淘汰一定程度的键
 int freeMemoryIfNeeded(void) {
     size_t mem_used, mem_tofree, mem_freed;
     int slaves = listLength(server.slaves);

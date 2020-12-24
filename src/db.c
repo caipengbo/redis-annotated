@@ -53,8 +53,6 @@ robj *lookupKey(redisDb *db, robj *key) {
 
     // 节点存在
     if (de) {
-        
-
         // 取出值
         robj *val = dictGetVal(de);
 
@@ -68,9 +66,7 @@ robj *lookupKey(redisDb *db, robj *key) {
         // 返回值
         return val;
     } else {
-
         // 节点不存在
-
         return NULL;
     }
 }
@@ -244,16 +240,9 @@ int dbExists(redisDb *db, robj *key) {
     return dictFind(db->dict,key->ptr) != NULL;
 }
 
-/* Return a random key, in form of a Redis object.
- * If there are no keys, NULL is returned.
- *
+/*
  * 随机从数据库中取出一个键，并以字符串对象的方式返回这个键。
- *
- * 如果数据库为空，那么返回 NULL 。
- *
- * The function makes sure to return keys not already expired. 
- *
- * 这个函数保证被返回的键都是未过期的。
+ * 如果数据库为空，那么返回 NULL 。这个函数保证被返回的键都是未过期的。
  */
 robj *dbRandomKey(redisDb *db) {
     dictEntry *de;
@@ -1104,13 +1093,7 @@ void setExpire(redisDb *db, robj *key, long long when) {
     dictSetSignedIntegerVal(de,when);
 }
 
-/* Return the expire time of the specified key, or -1 if no expire
- * is associated with this key (i.e. the key is non volatile) 
- *
- * 返回给定 key 的过期时间。
- *
- * 如果键没有设置过期时间，那么返回 -1 。
- */
+// 返回给定 key 的过期时间。如果键没有设置过期时间，那么返回 -1 。
 long long getExpire(redisDb *db, robj *key) {
     dictEntry *de;
 
@@ -1168,10 +1151,7 @@ void propagateExpire(redisDb *db, robj *key) {
 
 /*
  * 检查 key 是否已经过期，如果是的话，将它从数据库中删除。
- *
- * 返回 0 表示键没有过期时间，或者键未过期。
- *
- * 返回 1 表示键已经因为过期而被删除了。
+ * 返回 0 表示键没有过期时间，或者键未过期。返回 1 表示键已经因为过期而被删除了。
  */
 int expireIfNeeded(redisDb *db, robj *key) {
 

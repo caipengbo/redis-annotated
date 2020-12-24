@@ -1,19 +1,7 @@
-/* The ziplist is a specially encoded dually linked list that is designed
- * to be very memory efficient. 
+/* The ziplist is a specially encoded dually linked list that is designed to be very memory efficient.
  *
  * Ziplist 是为了尽可能地节约内存而设计的特殊编码双端链表。
- *
- * It stores both strings and integer values,
- * where integers are encoded as actual integers instead of a series of
- * characters. 
- *
- * Ziplist 可以储存字符串值和整数值，
- * 其中，整数值被保存为实际的整数，而不是字符数组。
- *
- * It allows push and pop operations on either side of the list
- * in O(1) time. However, because every operation requires a reallocation of
- * the memory used by the ziplist, the actual complexity is related to the
- * amount of memory used by the ziplist.
+ * Ziplist 可以储存字符串值和整数值，其中，整数值被保存为实际的整数，而不是字符数组。
  *
  * Ziplist 允许在列表的两端进行 O(1) 复杂度的 push 和 pop 操作。
  * 但是，因为这些操作都需要对整个 ziplist 进行内存重分配，
@@ -21,11 +9,9 @@
  *
  * ----------------------------------------------------------------------------
  *
- * ZIPLIST OVERALL LAYOUT:
  * Ziplist 的整体布局：
  *
- * The general layout of the ziplist is as follows:
- * 以下是 ziplist 的一般布局：
+ * ziplist 的一般布局：
  *
  * <zlbytes><zltail><zllen><entry><entry><zlend>
  *
@@ -33,38 +19,16 @@
  * ziplist occupies. This value needs to be stored to be able to resize the
  * entire structure without the need to traverse it first.
  *
- * <zlbytes> 是一个无符号整数，保存着 ziplist 使用的内存数量。
- *
- * 通过这个值，程序可以直接对 ziplist 的内存大小进行调整，
- * 而无须为了计算 ziplist 的内存大小而遍历整个列表。
- *
- * <zltail> is the offset to the last entry in the list. This allows a pop
- * operation on the far side of the list without the need for full traversal.
- *
- * <zltail> 保存着到达列表中最后一个节点的偏移量。
- *
+ * <zlbytes> 是一个无符号整数，保存着 ziplist 使用的内存数量。通过这个值，程序可以直接对 ziplist 的内存大小进行调整，
+ * 而无须为了计算 ziplist 的内存大小而遍历整个列表。 <zltail> 保存着到达列表中最后一个节点的偏移量。
  * 这个偏移量使得对表尾的 pop 操作可以在无须遍历整个列表的情况下进行。
  *
- * <zllen> is the number of entries.When this value is larger than 2**16-2,
- * we need to traverse the entire list to know how many items it holds.
- *
- * <zllen> 保存着列表中的节点数量。
- * 
- * 当 zllen 保存的值大于 2**16-2 时，
- * 程序需要遍历整个列表才能知道列表实际包含了多少个节点。
- *
- * <zlend> is a single byte special value, equal to 255, which indicates the
- * end of the list.
+ * <zllen> 保存着列表中的节点数量。当 zllen 保存的值大于 2**16-2 时，程序需要遍历整个列表才能知道列表实际包含了多少个节点。
  *
  * <zlend> 的长度为 1 字节，值为 255 ，标识列表的末尾。
  *
  * ZIPLIST ENTRIES:
  * ZIPLIST 节点：
- *
- * Every entry in the ziplist is prefixed by a header that contains two pieces
- * of information. First, the length of the previous entry is stored to be
- * able to traverse the list from back to front. Second, the encoding with an
- * optional string length of the entry itself is stored.
  *
  * 每个 ziplist 节点的前面都带有一个 header ，这个 header 包含两部分信息：
  *
@@ -145,35 +109,6 @@
  *
  * 所有整数都表示为小端字节序。
  *
- * ----------------------------------------------------------------------------
- *
- * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <stdio.h>

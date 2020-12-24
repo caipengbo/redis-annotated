@@ -178,11 +178,11 @@
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
  * is set to one of this fields for this object. */
-// 对象编码
+// 对象编码，因为某些类型（例如String Hash）在内部通常有多种表达方式
 #define REDIS_ENCODING_RAW 0     /* Raw representation */
 #define REDIS_ENCODING_INT 1     /* Encoded as integer */
 #define REDIS_ENCODING_HT 2      /* Encoded as hash table */
-#define REDIS_ENCODING_ZIPMAP 3  /* Encoded as zipmap */
+#define REDIS_ENCODING_ZIPMAP 3  /* Encoded as zipmap */  // 被废弃了
 #define REDIS_ENCODING_LINKEDLIST 4 /* Encoded as regular linked list */
 #define REDIS_ENCODING_ZIPLIST 5 /* Encoded as ziplist */
 #define REDIS_ENCODING_INTSET 6  /* Encoded as intset */
@@ -409,7 +409,7 @@ typedef struct redisObject {
     // 对象最后一次被访问的时间
     unsigned lru:REDIS_LRU_BITS; /* lru time (relative to server.lruclock) */
 
-    // 引用计数
+    // 引用计数  用于实现对象共享与回收
     int refcount;
 
     // 指向实际值的指针
@@ -693,8 +693,10 @@ struct saveparam {
 
 };
 
-// 通过复用来减少内存碎片，以及减少操作耗时的共享对象
+// 通过复用来减少内存碎片，以及减少操作耗时的共享对象，见createSharedObjects
 struct sharedObjectsStruct {
+    // 常见的CMD回复
+
     robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
     *colon, *nullbulk, *nullmultibulk, *queued,
     *emptymultibulk, *wrongtypeerr, *nokeyerr, *syntaxerr, *sameobjecterr,
@@ -704,7 +706,7 @@ struct sharedObjectsStruct {
     *unsubscribebulk, *psubscribebulk, *punsubscribebulk, *del, *rpop, *lpop,
     *lpush, *emptyscan, *minstring, *maxstring,
     *select[REDIS_SHARED_SELECT_CMDS],
-    *integers[REDIS_SHARED_INTEGERS],
+    *integers[REDIS_SHARED_INTEGERS],  /*共享整数*/
     *mbulkhdr[REDIS_SHARED_BULKHDR_LEN], /* "*<value>\r\n" */
     *bulkhdr[REDIS_SHARED_BULKHDR_LEN];  /* "$<value>\r\n" */
 };
@@ -1587,6 +1589,7 @@ void addReplyStatusFormat(redisClient *c, const char *fmt, ...);
 #endif
 
 /* List data type */
+// t_list.c
 void listTypeTryConversion(robj *subject, robj *value);
 void listTypePush(robj *subject, robj *value, int where);
 robj *listTypePop(robj *subject, int where);
@@ -1614,6 +1617,7 @@ void discardTransaction(redisClient *c);
 void flagTransaction(redisClient *c);
 
 /* Redis object implementation */
+// object.c
 void decrRefCount(robj *o);
 void decrRefCountVoid(void *o);
 void incrRefCount(robj *o);
@@ -1768,6 +1772,7 @@ void resetServerStats(void);
 unsigned int getLRUClock(void);
 
 /* Set data type */
+// t_set.c
 robj *setTypeCreate(robj *value);
 int setTypeAdd(robj *subject, robj *value);
 int setTypeRemove(robj *subject, robj *value);
@@ -1781,6 +1786,7 @@ unsigned long setTypeSize(robj *subject);
 void setTypeConvert(robj *subject, int enc);
 
 /* Hash data type */
+// t_hash.c
 void hashTypeConvert(robj *o, int enc);
 void hashTypeTryConversion(robj *subject, robj **argv, int start, int end);
 void hashTypeTryObjectEncoding(robj *subject, robj **o1, robj **o2);
