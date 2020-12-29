@@ -33,6 +33,7 @@ robj *createEmbeddedStringObject(char *ptr, size_t len) {
     // 仅需要一次内存分配（释放）
     // 数据保存在连续的内存里，可以更好的利用缓存
     robj *o = zmalloc(sizeof(robj)+sizeof(struct sdshdr)+len+1);
+    // 此处o+1: 代表的是紧挨着o的地方，是sdshdr的buf开始的地方
     struct sdshdr *sh = (void*)(o+1);
 
     o->type = REDIS_STRING;

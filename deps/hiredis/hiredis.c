@@ -682,7 +682,7 @@ static int intlen(int i) {
 static size_t bulklen(size_t len) {
     return 1+intlen(len)+2+len+2;
 }
-
+// 根据Redis协议转化成Command
 int redisvFormatCommand(char **target, const char *format, va_list ap) {
     const char *c = format;
     char *cmd = NULL; /* final command */

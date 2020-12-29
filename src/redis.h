@@ -376,6 +376,8 @@
 /* Using the following macro you can run code inside serverCron() with the
  * specified period, specified in milliseconds.
  * The actual resolution depends on server.hz. */
+// 1000/server.hz: 当前server执行 1 次需要的时间
+// (_ms_)/(1000/server.hz): 倍数
 #define run_with_period(_ms_) if ((_ms_ <= 1000/server.hz) || !(server.cronloops%((_ms_)/(1000/server.hz))))
 
 /* We can print the stacktrace, so our assert is defined this way: */
@@ -469,7 +471,7 @@ typedef struct redisDb {
 
     struct evictionPoolEntry *eviction_pool;    /* Eviction pool of keys */
 
-    // 数据库号码
+    // 数据库号码(在redisServer中的db数组中的下标)
     int id;                     /* Database ID */
 
     // 数据库的键的平均 TTL ，统计信息
@@ -574,19 +576,19 @@ typedef struct redisClient {
     // 客户端的名字
     robj *name;             /* As set by CLIENT SETNAME */
 
-    // 查询缓冲区
+    // 查询缓冲区（从客户端read内容）
     sds querybuf;
 
     // 查询缓冲区长度峰值
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size */
 
+    // SET key value   argv[0] "SET"  argv[1] "key"  argv[2] "value"
     // 参数数量
     int argc;
-
-    // 参数对象数组
+    // 参数对象数组 robj *argv[argc]
     robj **argv;
 
-    // 记录被客户端执行的命令
+    // 记录当前被客户端执行的命令
     struct redisCommand *cmd, *lastcmd;
 
     // 请求的类型：内联命令还是多条命令
@@ -837,7 +839,7 @@ struct redisServer {
     // serverCron() 每秒调用的次数
     int hz;                     /* serverCron() calls frequency in hertz */
 
-    // 数据库
+    // 数据库（数组）
     redisDb *db;
 
     // 命令表（受到 rename 配置选项的作用）
@@ -1139,7 +1141,7 @@ struct redisServer {
     // 主服务器发送 PING 的频率
     int repl_ping_slave_period;     /* Master pings the slave every N seconds */
 
-    // backlog 本身
+    // backlog 本身（）
     char *repl_backlog;             /* Replication backlog for partial syncs */
     // backlog 的长度
     long long repl_backlog_size;    /* Backlog circular buffer size */
@@ -1530,6 +1532,7 @@ size_t redisPopcount(void *s, long count);
 void redisSetProcTitle(char *title);
 
 /* networking.c -- Networking and Client related operations */
+// 对socket的封装
 redisClient *createClient(int fd);
 void closeTimedoutClients(void);
 void freeClient(redisClient *c);

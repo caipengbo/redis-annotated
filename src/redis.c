@@ -818,9 +818,6 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
  * 如果带有过期时间的键比较多，那么函数会以更积极的方式来删除过期键，
  * 从而可能地释放被过期键占用的内存。
  *
- * No more than REDIS_DBCRON_DBS_PER_CALL databases are tested at every
- * iteration.
- *
  * 每次循环中被测试的数据库数目不会超过 REDIS_DBCRON_DBS_PER_CALL 。
  *
  * This kind of call is used when Redis detects that timelimit_exit is
@@ -834,18 +831,10 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
  *
  * 过期循环的类型：
  *
- * If type is ACTIVE_EXPIRE_CYCLE_FAST the function will try to run a
- * "fast" expire cycle that takes no longer than EXPIRE_FAST_CYCLE_DURATION
- * microseconds, and is not repeated again before the same amount of time.
- *
  * 如果循环的类型为 ACTIVE_EXPIRE_CYCLE_FAST ，
  * 那么函数会以“快速过期”模式执行，
  * 执行的时间不会长过 EXPIRE_FAST_CYCLE_DURATION 毫秒，
  * 并且在 EXPIRE_FAST_CYCLE_DURATION 毫秒之内不会再重新执行。
- *
- * If type is ACTIVE_EXPIRE_CYCLE_SLOW, that normal expire cycle is
- * executed, where the time limit is a percentage of the REDIS_HZ period
- * as specified by the REDIS_EXPIRELOOKUPS_TIME_PERC define. 
  *
  * 如果循环的类型为 ACTIVE_EXPIRE_CYCLE_SLOW ，
  * 那么函数会以“正常过期”模式执行，
@@ -903,6 +892,7 @@ void activeExpireCycle(int type) {
      * microseconds we can spend in this function. */
     // 函数处理的微秒时间上限
     // ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC 默认为 25 ，也即是 25 % 的 CPU 时间
+    // 1000000 * (25/100) * (1/10)
     timelimit = 1000000*ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC/server.hz/100;
     timelimit_exit = 0;
     if (timelimit <= 0) timelimit = 1;
@@ -919,9 +909,6 @@ void activeExpireCycle(int type) {
         // 指向要处理的数据库
         redisDb *db = server.db+(current_db % server.dbnum);
 
-        /* Increment the DB now so we are sure if we run out of time
-         * in the current DB we'll restart from the next. This allows to
-         * distribute the time evenly across DBs. */
         // 为 DB 计数器加一，如果进入 do 循环之后因为超时而跳出
         // 那么下次会直接从下个 DB 开始处理
         current_db++;
@@ -933,7 +920,6 @@ void activeExpireCycle(int type) {
             long long now, ttl_sum;
             int ttl_samples;
 
-            /* If there is nothing to expire try next DB ASAP. */
             // 获取数据库中带过期时间的键的数量
             // 如果该数量为 0 ，直接跳过这个数据库
             if ((num = dictSize(db->expires)) == 0) {
@@ -948,15 +934,14 @@ void activeExpireCycle(int type) {
             /* When there are less than 1% filled slots getting random
              * keys is expensive, so stop here waiting for better times...
              * The dictionary will be resized asap. */
-            // 这个数据库的使用率低于 1% ，扫描起来太费力了（大部分都会 MISS）
-            // 跳过，等待字典收缩程序运行
+            // 这个数据库的字典slot被填满的比例小于1% ，随机采样的时候，大部分都会 MISS
+            // 所以跳过当前db，等待字典收缩程序运行
             if (num && slots > DICT_HT_INITIAL_SIZE &&
                 (num*100/slots < 1)) break;
 
             /* The main collection cycle. Sample random keys among keys
              * with an expire set, checking for expired ones. 
-             *
-             * 样本计数器
+             * 采样cycle,随机采样key
              */
             // 已处理过期键计数器
             expired = 0;
@@ -969,7 +954,7 @@ void activeExpireCycle(int type) {
             if (num > ACTIVE_EXPIRE_CYCLE_LOOKUPS_PER_LOOP)
                 num = ACTIVE_EXPIRE_CYCLE_LOOKUPS_PER_LOOP;
 
-            // 开始遍历数据库
+            // 开始遍历数据库，检查num个键
             while (num--) {
                 dictEntry *de;
                 long long ttl;
@@ -1000,19 +985,14 @@ void activeExpireCycle(int type) {
                 db->avg_ttl = (db->avg_ttl+avg_ttl)/2;
             }
 
-            /* We can't block forever here even if there are many keys to
-             * expire. So after a given amount of milliseconds return to the
-             * caller waiting for the other active expire cycle. */
-            // 我们不能用太长时间处理过期键，
-            // 所以这个函数执行一定时间之后就要返回
+            // 不能用太长时间处理过期键，所以这个函数执行一定时间之后就要返回
 
             // 更新遍历次数
             iteration++;
 
-            // 每遍历 16 次执行一次
-            if ((iteration & 0xf) == 0 && /* check once every 16 iterations. */
-                (ustime()-start) > timelimit)
-            {
+            // 检查当前函数的运行时间
+            // 每遍历 16 次执行一次（使用&，提高计算的速度）
+            if ((iteration & 0xf) == 0 && (ustime()-start) > timelimit) {
                 // 如果遍历次数正好是 16 的倍数
                 // 并且遍历的时间超过了 timelimit
                 // 那么断开 timelimit_exit
@@ -1024,7 +1004,7 @@ void activeExpireCycle(int type) {
 
             /* We don't repeat the cycle if there are less than 25% of keys
              * found expired in the current DB. */
-            // 如果已删除的过期键占当前总数据库带过期时间的键数量的 25 %
+            // 如果已删除的过期键占当前lookups_per_loop 的 25 %
             // 那么不再遍历
         } while (expired > ACTIVE_EXPIRE_CYCLE_LOOKUPS_PER_LOOP/4);
     }
@@ -1315,8 +1295,7 @@ void updateCachedTime(void) {
  * a macro is used: run_with_period(milliseconds) { .... }
  *
  * 因为 serverCron 函数中的所有代码都会每秒调用 server.hz 次，
- * 为了对部分代码的调用次数进行限制，
- * 使用了一个宏 run_with_period(milliseconds) { ... } ，
+ * 为了对部分代码的调用次数进行限制，使用了一个宏 run_with_period(milliseconds) { ... } ，
  * 这个宏可以将被包含代码的执行次数降低为每 milliseconds 执行一次。
  */
 
@@ -2148,8 +2127,6 @@ void initServer() {
     server.repl_good_slaves_count = 0;
     updateCachedTime();
 
-    /* Create the serverCron() time event, that's our main way to process
-     * background operations. */
     // 为 serverCron() 创建时间事件
     if(aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         redisPanic("Can't create the serverCron time event.");
@@ -2158,8 +2135,7 @@ void initServer() {
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
-    // 为 TCP 连接关联连接应答（accept）处理器
-    // 用于接受并应答客户端的 connect() 调用
+    // 为 TCP 连接关联连接应答（accept）处理器，用于接受并应答客户端的 connect() 调用
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
             acceptTcpHandler,NULL) == AE_ERR)
@@ -2682,8 +2658,7 @@ int processCommand(redisClient *c) {
 
     /* Don't accept write commands if there are not enough good slaves and
      * user configured the min-slaves-to-write option. */
-    // 如果服务器没有足够多的状态良好服务器
-    // 并且 min-slaves-to-write 选项已打开
+    // 如果服务器没有足够多的状态良好服务器，并且 min-slaves-to-write 选项已打开
     if (server.repl_min_slaves_to_write &&
         server.repl_min_slaves_max_lag &&
         c->cmd->flags & REDIS_CMD_WRITE &&
@@ -3934,6 +3909,7 @@ void redisSetProcTitle(char *title) {
 #endif
 }
 
+// redis-server
 int main(int argc, char **argv) {
     struct timeval tv;
 

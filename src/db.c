@@ -1,30 +1,5 @@
 /*
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * 对数据库的键空间进行操作
  */
 
 #include "redis.h"
@@ -372,7 +347,7 @@ int selectDb(redisClient *c, int id) {
     if (id < 0 || id >= server.dbnum)
         return REDIS_ERR;
 
-    // 切换数据库（更新指针）
+    // 切换客户端的数据库（更新指针）
     c->db = &server.db[id];
 
     return REDIS_OK;
@@ -1060,7 +1035,7 @@ void moveCommand(redisClient *c) {
  *----------------------------------------------------------------------------*/
 
 /*
- * 移除键 key 的过期时间
+ * 移除键 key 的过期时间，从expires字典中移出
  */
 int removeExpire(redisDb *db, robj *key) {
     /* An expire may only be removed if there is a corresponding entry in the
@@ -1150,7 +1125,7 @@ void propagateExpire(redisDb *db, robj *key) {
 }
 
 /*
- * 检查 key 是否已经过期，如果是的话，将它从数据库中删除。
+ * 惰性删除策略：检查 key 是否已经过期，如果是的话，将它从数据库中删除。
  * 返回 0 表示键没有过期时间，或者键未过期。返回 1 表示键已经因为过期而被删除了。
  */
 int expireIfNeeded(redisDb *db, robj *key) {
@@ -1159,10 +1134,9 @@ int expireIfNeeded(redisDb *db, robj *key) {
     mstime_t when = getExpire(db,key);
     mstime_t now;
 
-    // 没有过期时间
+    // 没有设置key过期时间
     if (when < 0) return 0; /* No expire for this key */
 
-    /* Don't expire anything while loading. It will be done later. */
     // 如果服务器正在进行载入，那么不进行任何过期检查
     if (server.loading) return 0;
 
@@ -1189,14 +1163,13 @@ int expireIfNeeded(redisDb *db, robj *key) {
 
     // 运行到这里，表示键带有过期时间，并且服务器为主节点
 
-    /* Return when this key has not expired */
     // 如果未过期，返回 0
     if (now <= when) return 0;
 
-    /* Delete the key */
+    // 已过期key的数目++
     server.stat_expiredkeys++;
 
-    // 向 AOF 文件和附属节点传播过期信息
+    // 向AOF文件和附属节点传播过期信息
     propagateExpire(db,key);
 
     // 发送事件通知
@@ -1218,6 +1191,8 @@ int expireIfNeeded(redisDb *db, robj *key) {
  *
  * 这个函数是 EXPIRE 、 PEXPIRE 、 EXPIREAT 和 PEXPIREAT 命令的底层实现函数。
  *
+ * 四种命令最终都转化为PEXPIREAT（key在哪个时间失效）
+ *
  * 命令的第二个参数可能是绝对值，也可能是相对值。
  * 当执行 *AT 命令时， basetime 为 0 ，在其他情况下，它保存的就是当前的绝对时间。
  *
@@ -1232,7 +1207,7 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     robj *key = c->argv[1], *param = c->argv[2];
     long long when; /* unix time in milliseconds when the key will expire. */
 
-    // 取出 when 参数
+    // 取出param中的参数，放在 when 参数中
     if (getLongLongFromObjectOrReply(c, param, &when, NULL) != REDIS_OK)
         return;
 
@@ -1240,7 +1215,6 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     if (unit == UNIT_SECONDS) when *= 1000;
     when += basetime;
 
-    /* No key, return zero. */
     // 取出键
     if (lookupKeyRead(c->db,key) == NULL) {
         addReply(c,shared.czero);
@@ -1254,6 +1228,7 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
      * 在载入数据时，或者服务器为附属节点时，
      * 即使 EXPIRE 的 TTL 为负数，或者 EXPIREAT 提供的时间戳已经过期，
      * 服务器也不会主动删除这个键，而是等待主节点发来显式的 DEL 命令。
+     * （因为有可能传到从节点消耗了许多时间，传到从节点的时候键已经过期了）
      *
      * Instead we take the other branch of the IF statement setting an expire
      * (possibly in the past) and wait for an explicit DEL from the master. 
@@ -1264,7 +1239,6 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     if (when <= mstime() && !server.loading && !server.masterhost) {
 
         // when 提供的时间已经过期，服务器为主节点，并且没在载入数据
-
         robj *aux;
 
         redisAssertWithInfo(c,key,dbDelete(c->db,key));
@@ -1284,10 +1258,7 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
 
         return;
     } else {
-
-        // 设置键的过期时间
-        // 如果服务器为附属节点，或者服务器正在载入，
-        // 那么这个 when 有可能已经过期的
+        // 设置键的过期时间，如果服务器为附属节点，或者服务器正在载入，那么这个 when 有可能已经过期的
         setExpire(c->db,key,when);
 
         addReply(c,shared.cone);
@@ -1364,7 +1335,7 @@ void ttlCommand(redisClient *c) {
 void pttlCommand(redisClient *c) {
     ttlGenericCommand(c, 1);
 }
-
+// 取消键过期时间
 void persistCommand(redisClient *c) {
     dictEntry *de;
 

@@ -2,32 +2,6 @@
  * for the Jim's event-loop (Jim is a Tcl interpreter) but later translated
  * it in form of a library for easy reuse.
  *
- * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef __AE_H__
@@ -86,14 +60,12 @@ typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientDat
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure
- *
  * 文件事件结构
  */
 typedef struct aeFileEvent {
 
     // 监听事件类型掩码，
-    // 值可以是 AE_READABLE 或 AE_WRITABLE ，
-    // 或者 AE_READABLE | AE_WRITABLE
+    // 值可以是 AE_READABLE 或 AE_WRITABLE
     int mask; /* one of AE_(READABLE|WRITABLE) */
 
     // 读事件处理器
@@ -108,15 +80,14 @@ typedef struct aeFileEvent {
 } aeFileEvent;
 
 /* Time event structure
- *
- * 时间事件结构
+ * 时间事件结构（链表节点）
  */
 typedef struct aeTimeEvent {
 
     // 时间事件的唯一标识符
     long long id; /* time event identifier. */
 
-    // 事件的到达时间
+    // 事件的到达时间，更新时间，便可以形成周期性事件
     long when_sec; /* seconds */
     long when_ms; /* milliseconds */
 
@@ -150,9 +121,8 @@ typedef struct aeFiredEvent {
 
 } aeFiredEvent;
 
-/* State of an event based program 
- *
- * 事件处理器的状态
+/* State of an event based program
+ * 事件处理器的状态，保存事件处理的一些信息
  */
 typedef struct aeEventLoop {
 
@@ -168,13 +138,13 @@ typedef struct aeEventLoop {
     // 最后一次执行时间事件的时间
     time_t lastTime;     /* Used to detect system clock skew */
 
-    // 已注册的文件事件
+    // 已注册的文件事件（链表）
     aeFileEvent *events; /* Registered events */
 
     // 已就绪的文件事件
     aeFiredEvent *fired; /* Fired events */
 
-    // 时间事件
+    // 时间事件（链表）
     aeTimeEvent *timeEventHead;
 
     // 事件处理器的开关

@@ -2,32 +2,6 @@
  * for the Jim's event-loop (Jim is a Tcl interpreter) but later translated
  * it in form of a library for easy reuse.
  *
- * Copyright (c) 2006-2010, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <stdio.h>
@@ -46,6 +20,7 @@
 
 /* Include the best multiplexing layer supported by this system.
  * The following should be ordered by performances, descending. */
+// 选择当前系统支持的IO多路复用接口
 #ifdef HAVE_EVPORT
 #include "ae_evport.c"
 #else
@@ -61,7 +36,7 @@
 #endif
 
 /*
- * 初始化事件处理器状态
+ * 初始化事件处理器状态（initServer中调用）
  */
 aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
@@ -164,8 +139,8 @@ void aeStop(aeEventLoop *eventLoop) {
 }
 
 /*
- * 根据 mask 参数的值，监听 fd 文件的状态，
- * 当 fd 可用时，执行 proc 函数
+ * 将给定套接字的给定事件加入到IO多路复用器的监听内，并对事件和事件处理器关联
+ * 根据 mask 参数的值，监听 fd 文件的状态，当 fd 可用时，执行 proc 函数
  */
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
@@ -357,8 +332,8 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id)
  *    Much better but still insertion or deletion of timers is O(N).
  * 2) Use a skiplist to have this operation as O(1) and insertion as O(log(N)).
  */
-// 寻找里目前时间最近的时间事件
-// 因为链表是乱序的，所以查找复杂度为 O（N）
+// 寻找里目前时间最近的时间事件，因为链表是乱序的，所以查找复杂度为 O（N）
+// 不过事件链表很短，也不会消耗太多的查找时间
 static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 {
     aeTimeEvent *te = eventLoop->timeEventHead;
@@ -375,7 +350,6 @@ static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 }
 
 /* Process time events
- *
  * 处理所有已到达的时间事件
  */
 static int processTimeEvents(aeEventLoop *eventLoop) {
@@ -466,40 +440,33 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
 
 /* Process every pending time event, then every pending file event
  * (that may be registered by time event callbacks just processed).
- *
- * 处理所有已到达的时间事件，以及所有已就绪的文件事件。
- *
  * Without special flags the function sleeps until some file event
  * fires, or when the next time event occurs (if any).
- *
- * 如果不传入特殊 flags 的话，那么函数睡眠直到文件事件就绪，
- * 或者下个时间事件到达（如果有的话）。
- *
  * If flags is 0, the function does nothing and returns.
- * 如果 flags 为 0 ，那么函数不作动作，直接返回。
- *
  * if flags has AE_ALL_EVENTS set, all the kind of events are processed.
- * 如果 flags 包含 AE_ALL_EVENTS ，所有类型的事件都会被处理。
- *
  * if flags has AE_FILE_EVENTS set, file events are processed.
- * 如果 flags 包含 AE_FILE_EVENTS ，那么处理文件事件。
- *
  * if flags has AE_TIME_EVENTS set, time events are processed.
- * 如果 flags 包含 AE_TIME_EVENTS ，那么处理时间事件。
- *
  * if flags has AE_DONT_WAIT set the function returns ASAP until all
  * the events that's possible to process without to wait are processed.
+ * The function returns the number of events processed.
+ *
+ * 处理所有已到达的时间事件，以及所有已就绪的文件事件。
+ * 如果不传入特殊 flags 的话，那么函数睡眠直到文件事件就绪，或者下个时间事件到达（如果有的话）。
+ * 如果 flags 为 0 ，那么函数不作动作，直接返回。
+ * 如果 flags 包含 AE_ALL_EVENTS ，所有类型的事件都会被处理。
+ * 如果 flags 包含 AE_FILE_EVENTS ，那么处理文件事件。
+ * 如果 flags 包含 AE_TIME_EVENTS ，那么处理时间事件。
  * 如果 flags 包含 AE_DONT_WAIT ，
  * 那么函数在处理完所有不许阻塞的事件之后，即刻返回。
- *
- * The function returns the number of events processed. 
  * 函数的返回值为已处理事件的数量
+ *
  */
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
-    /* Nothing to do? return ASAP */
+    /* Nothing to do? return ASAP（as soon as possible） */
+    // 尽快返回
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
     /* Note that we want call select() even if there are no
@@ -558,6 +525,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
         // 处理文件事件，阻塞时间由 tvp 决定
         numevents = aeApiPoll(eventLoop, tvp);
+
         for (j = 0; j < numevents; j++) {
             // 从已就绪数组中获取事件
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
@@ -594,8 +562,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 }
 
 /* Wait for milliseconds until the given file descriptor becomes
- * writable/readable/exception 
- *
+ * writable/readable/exceptionx
  * 在给定毫秒内等待，直到 fd 变成可写、可读或异常
  */
 int aeWait(int fd, int mask, long long milliseconds) {

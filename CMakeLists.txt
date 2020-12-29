@@ -35,6 +35,9 @@ set(SRC_SERVER
 set(SRC_CLI
         src/anet.c src/sds.c src/adlist.c src/redis-cli.c src/zmalloc.c src/release.c src/anet.c src/ae.c src/crc64.c
         )
+set(SRC_BENCHMARK
+        src/anet.c src/sds.c src/adlist.c src/redis-benchmark.c src/zmalloc.c src/release.c src/anet.c src/ae.c src/crc64.c
+        )
 
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -43,6 +46,7 @@ endif()
 
 add_executable(redis-server ${SRC_SERVER})
 add_executable(redis-cli ${SRC_CLI})
+add_executable(redis-benchmark ${SRC_BENCHMARK})
 
 set_property(TARGET redis-server PROPERTY C_STANDARD 99)
 set_property(TARGET redis-server PROPERTY CXX_STANDARD 11)
@@ -52,6 +56,9 @@ set_property(TARGET redis-cli PROPERTY C_STANDARD 99)
 set_property(TARGET redis-cli PROPERTY CXX_STANDARD 11)
 set_property(TARGET redis-cli PROPERTY CXX_STANDARD_REQUIRED ON)
 
+set_property(TARGET redis-benchmark PROPERTY C_STANDARD 99)
+set_property(TARGET redis-benchmark PROPERTY CXX_STANDARD 11)
+set_property(TARGET redis-benchmark PROPERTY CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(redis-server
         PRIVATE ${REDIS_ROOT}/deps/hiredis
@@ -67,6 +74,11 @@ target_include_directories(redis-cli
         PRIVATE ${REDIS_ROOT}/deps/lua/src
         )
 
+target_include_directories(redis-benchmark
+        PRIVATE ${REDIS_ROOT}/deps/hiredis
+        PRIVATE ${REDIS_ROOT}/deps/linenoise
+        # PRIVATE ${REDIS_ROOT}/deps/jemalloc
+        )
 
 target_link_libraries(redis-server
         PRIVATE pthread
@@ -77,6 +89,13 @@ target_link_libraries(redis-server
         )
 
 target_link_libraries(redis-cli
+        PRIVATE pthread
+        PRIVATE m
+        PRIVATE linenoise
+        PRIVATE hiredis
+        )
+
+target_link_libraries(redis-benchmark
         PRIVATE pthread
         PRIVATE m
         PRIVATE linenoise

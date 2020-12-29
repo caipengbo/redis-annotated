@@ -1,30 +1,5 @@
 /*
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * 客户端和服务器的网络交互相关，事件处理函数
  */
 
 #include "redis.h"
@@ -188,28 +163,25 @@ redisClient *createClient(int fd) {
 /* This function is called every time we are going to transmit new data
  * to the client. The behavior is the following:
  *
- * 这个函数在每次向客户端发送数据时都会被调用。函数的行为如下：
- *
  * If the client should receive new data (normal clients will) the function
  * returns REDIS_OK, and make sure to install the write handler in our event
  * loop so that when the socket is writable new data gets written.
- *
- * 当客户端可以接收新数据时（通常情况下都是这样），函数返回 REDIS_OK ，
- * 并将写处理器（write handler）安装到事件循环中，
- * 这样当套接字可写时，新数据就会被写入。
  *
  * If the client should not receive new data, because it is a fake client,
  * a master, a slave not yet online, or because the setup of the write handler
  * failed, the function returns REDIS_ERR.
  *
- * 对于那些不应该接收新数据的客户端，
- * 比如伪客户端、 master 以及 未 ONLINE 的 slave ，
- * 或者写处理器安装失败时，
- * 函数返回 REDIS_ERR 。
- *
  * Typically gets called every time a reply is built, before adding more
  * data to the clients output buffers. If the function returns REDIS_ERR no
- * data should be appended to the output buffers. 
+ * data should be appended to the output buffers.
+ *
+ * 这个函数在每次向客户端发送数据时都会被调用。函数的行为如下：
+ *
+ * 当客户端可以接收新数据时（通常情况下都是这样），函数返回 REDIS_OK ，
+ * 并将写处理器（write handler）安装到事件循环中，这样当套接字可写时，新数据就会被写入。
+ *
+ * 对于那些不应该接收新数据的客户端，比如伪客户端、 master 以及 未 ONLINE 的 slave ，
+ * 或者写处理器安装失败时，函数返回 REDIS_ERR 。
  *
  * 通常在每个回复被创建时调用，如果函数返回 REDIS_ERR ，
  * 那么没有数据会被追加到输出缓冲区。
@@ -789,7 +761,7 @@ static void acceptCommonHandler(int fd, int flags) {
 }
 
 /* 
- * 创建一个 TCP 连接处理器
+ * 创建一个 TCP 连接处理器(当有客户端建立连接的时候)
  */
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
@@ -808,7 +780,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         redisLog(REDIS_VERBOSE,"Accepted %s:%d", cip, cport);
-        // 为客户端创建客户端状态（redisClient）
+        // 创建客户端（redisClient）数据结构
         acceptCommonHandler(cfd,0);
     }
 }
@@ -882,7 +854,7 @@ void replicationHandleMasterDisconnection(void) {
 }
 
 /*
- * 释放客户端
+ * 释放客户端（同时会将与client关联的都进行清楚）
  */
 void freeClient(redisClient *c) {
     listNode *ln;
@@ -952,8 +924,7 @@ void freeClient(redisClient *c) {
     // 清空命令参数
     freeClientArgv(c);
 
-    /* Remove from the list of clients */
-    // 从服务器的客户端链表中删除自身
+    // 从服务器的客户端链表clients中删除自身
     if (c->fd != -1) {
         ln = listSearchKey(server.clients,c);
         redisAssert(ln != NULL);
@@ -1118,7 +1089,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
          * super fast link that is always able to accept data (in real world
          * scenario think about 'KEYS *' against the loopback interface).
          *
-         * 为了避免一个非常大的回复独占服务器，
+         * 为了避免一个非常大的回复独占服务器（因为事件是不可抢占的），
          * 当写入的总数量大于 REDIS_MAX_WRITE_PER_EVENT ，
          * 临时中断写入，将处理时间让给其他客户端，
          * 剩余的内容等下次写入就绪再继续写入
@@ -1323,7 +1294,7 @@ int processMultibulkBuffer(redisClient *c) {
 
         /* We know for sure there is a whole line since newline != NULL,
          * so go ahead and find out the multi bulk length. */
-        // 协议的第一个字符必须是 '*'
+        // (非inline)协议的第一个字符必须是 '*'
         redisAssertWithInfo(c,NULL,c->querybuf[0] == '*');
         // 将参数个数，也即是 * 之后， \r\n 之前的数字取出并保存到 ll 中
         // 比如对于 *3\r\n ，那么 ll 将等于 3
@@ -1487,8 +1458,7 @@ void processInputBuffer(redisClient *c) {
     /* Keep processing while there is something in the input buffer */
     // 尽可能地处理查询缓冲区中的内容
     // 如果读取出现 short read ，那么可能会有内容滞留在读取缓冲区里面
-    // 这些滞留内容也许不能完整构成一个符合协议的命令，
-    // 需要等待下次读事件的就绪
+    // 这些滞留内容也许不能完整构成一个符合协议的命令，需要等待下次读事件的就绪
     while(sdslen(c->querybuf)) {
 
         /* Return if clients are paused. */
@@ -1613,8 +1583,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    // 查询缓冲区长度超出服务器最大缓冲区长度
-    // 清空缓冲区并释放客户端
+    // 查询缓冲区长度超出服务器最大缓冲区长度，清空缓冲区并释放客户端
     if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
@@ -1626,8 +1595,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    // 从查询缓存重读取内容，创建参数，并执行命令
-    // 函数会执行到缓存中的所有内容都被处理完为止
+    // 从查询缓存重读取内容，创建参数，并执行命令，函数会执行到缓存中的所有内容都被处理完为止
     processInputBuffer(c);
 
     server.current_client = NULL;
@@ -1778,7 +1746,7 @@ sds getAllClientsInfoString(void) {
 }
 
 /*
- * CLIENT 命令的实现
+ * CLIENT命令的实现
  */
 void clientCommand(redisClient *c) {
     listNode *ln;
