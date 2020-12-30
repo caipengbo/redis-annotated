@@ -28,7 +28,9 @@ static struct config {
     int hostport;
     const char *hostsocket;
     int numclients;
+    // 已经创建的存活的client
     int liveclients;
+    // 每个test suite要执行的request数目
     int requests;
     int requests_issued;
     int requests_finished;
@@ -40,6 +42,7 @@ static struct config {
     int pipeline;
     long long start;
     long long totlatency;
+    // 延时数组，index是每个请求的index，值是该request的延时
     long long *latency;
     const char *title;
     list *clients;
@@ -52,16 +55,23 @@ static struct config {
     char *tests;
 } config;
 
+// 一个请求客户端
 typedef struct _client {
+    //redis上下文
     redisContext *context;
+    // 缓冲区
     sds obuf;
+    //rand指针数组
     char **randptr;         /* Pointers to :rand: strings inside the command buf */
     size_t randlen;         /* Number of pointers in client->randptr */
     size_t randfree;        /* Number of unused pointers in client->randptr */
     unsigned int written;   /* Bytes of 'obuf' already written */
     long long start;        /* Start time of a request */
+    // 请求的延时
     long long latency;      /* Request latency */
+    // 当前客户端正在等待的request（流水线可以有多个request）
     int pending;            /* Number of pending requests (replies to consume) */
+    // 流水线机制
     int selectlen;  /* If non-zero, a SELECT of 'selectlen' bytes is currently
                        used as a prefix of the pipline of commands. This gets
                        discarded the first time it's sent. */
@@ -116,14 +126,18 @@ static void freeAllClients(void) {
     }
 }
 
+// 重置（复用）客户端（socket连接），重新发送当前客户端保存的命令（obuf）
 static void resetClient(client c) {
     aeDeleteFileEvent(config.el,c->context->fd,AE_WRITABLE);
     aeDeleteFileEvent(config.el,c->context->fd,AE_READABLE);
+    // 还是用当前client，发送新的请求
     aeCreateFileEvent(config.el,c->context->fd,AE_WRITABLE,writeHandler,c);
+    // 表明当前obuf还没有写入socket
     c->written = 0;
     c->pending = config.pipeline;
 }
 
+// 将key进行随机化
 static void randomizeClientKey(client c) {
     size_t i;
 
@@ -139,13 +153,16 @@ static void randomizeClientKey(client c) {
         }
     }
 }
-
+// 当前Client执行完毕
 static void clientDone(client c) {
+    // 检查是否所有request都执行完毕
     if (config.requests_finished == config.requests) {
         freeClient(c);
+        // 终止eventloop
         aeStop(config.el);
         return;
     }
+    // 是否保留client（保留当前连接）
     if (config.keepalive) {
         resetClient(c);
     } else {
@@ -155,7 +172,7 @@ static void clientDone(client c) {
         freeClient(c);
     }
 }
-
+// 读事件处理函数，read socket 接受服务器返回的回复
 static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     client c = privdata;
     void *reply = NULL;
@@ -190,6 +207,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
 
                     /* This is the OK from SELECT. Just discard the SELECT
                      * from the buffer. */
+                    //执行到这里，请求已经执行成功，等待的请求数减1
                     c->pending--;
                     sdsrange(c->obuf,c->selectlen,-1);
                     /* We also need to fix the pointers to the strings
@@ -199,10 +217,11 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     c->selectlen = 0;
                     continue;
                 }
-
+                // 当前请求完成，记录下来响应时间 latency
                 if (config.requests_finished < config.requests)
                     config.latency[config.requests_finished++] = c->latency;
                 c->pending--;
+                // 当前客户端所有请求均收到回复，当前client完成任务
                 if (c->pending == 0) {
                     clientDone(c);
                     break;
@@ -214,13 +233,14 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 }
 
+// 写事件处理函数（写到socket），向服务器发送命令
 static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     client c = privdata;
     REDIS_NOTUSED(el);
     REDIS_NOTUSED(fd);
     REDIS_NOTUSED(mask);
 
-    /* Initialize request when nothing was written. */
+    // 当前客户端还没有内容写入socket，初始化一些东西
     if (c->written == 0) {
         /* Enforce upper bound to number of requests. */
         if (config.requests_issued++ >= config.requests) {
@@ -229,11 +249,12 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         }
 
         /* Really initialize: randomize keys and set start time. */
+        // 当前命令的key是否需要随机化
         if (config.randomkeys) randomizeClientKey(c);
         c->start = ustime();
         c->latency = -1;
     }
-
+    // 将数据写入socket
     if (sdslen(c->obuf) > c->written) {
         void *ptr = c->obuf+c->written;
         int nwritten = write(c->context->fd,ptr,sdslen(c->obuf)-c->written);
@@ -244,6 +265,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         c->written += nwritten;
+        // obuf被发送（write到socket）完了，创建读事件（等待回复）
         if (sdslen(c->obuf) == c->written) {
             aeDeleteFileEvent(config.el,c->context->fd,AE_WRITABLE);
             aeCreateFileEvent(config.el,c->context->fd,AE_READABLE,readHandler,c);
@@ -266,7 +288,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
  * we want to create a client using another client as reference, the 'from' pointer
  * points to the client to use as reference. In such a case the following
  * information is take from the 'from' client:
- *
+ * 因为需要创建大量的client执行相同的命令，所以from代表复用上一个client的一些内容：
  * 1) The command line to use.
  * 2) The offsets of the __rand_int__ elements inside the command line, used
  *    for arguments randomization.
@@ -277,6 +299,7 @@ static client createClient(char *cmd, size_t len, client from) {
     int j;
     client c = zmalloc(sizeof(struct _client));
 
+    // 创建socket连接
     if (config.hostsocket == NULL) {
         c->context = redisConnectNonBlock(config.hostip,config.hostport);
     } else {
@@ -312,14 +335,14 @@ static client createClient(char *cmd, size_t len, client from) {
 
     /* Append the request itself. */
     if (from) {
-        c->obuf = sdscatlen(c->obuf,
-            from->obuf+from->selectlen,
-            sdslen(from->obuf)-from->selectlen);
+        c->obuf = sdscatlen(c->obuf,from->obuf+from->selectlen,sdslen(from->obuf)-from->selectlen);
     } else {
-        for (j = 0; j < config.pipeline; j++)
+        for (j = 0; j < config.pipeline; j++) {
             c->obuf = sdscatlen(c->obuf,cmd,len);
+        }
     }
     c->written = 0;
+    // 同时发送多个请求
     c->pending = config.pipeline;
     c->randptr = NULL;
     c->randlen = 0;
@@ -343,6 +366,7 @@ static client createClient(char *cmd, size_t len, client from) {
             c->randlen = 0;
             c->randfree = RANDPTR_INITIAL_SIZE;
             c->randptr = zmalloc(sizeof(char*)*c->randfree);
+            // strstr: 首次出现的位置
             while ((p = strstr(p,"__rand_int__")) != NULL) {
                 if (c->randfree == 0) {
                     c->randptr = zrealloc(c->randptr,sizeof(char*)*c->randlen*2);
@@ -354,12 +378,14 @@ static client createClient(char *cmd, size_t len, client from) {
             }
         }
     }
+    // 注册写事件
     aeCreateFileEvent(config.el,c->context->fd,AE_WRITABLE,writeHandler,c);
     listAddNodeTail(config.clients,c);
     config.liveclients++;
     return c;
 }
 
+// 当前client发送过了命令之后
 static void createMissingClients(client c) {
     int n = 0;
     char *buf = c->obuf;
@@ -371,7 +397,7 @@ static void createMissingClients(client c) {
         buf += c->selectlen;
         buflen -= c->selectlen;
     }
-
+    // 如果当前存活的client数目少于配置的client数目，那么就一直创建client
     while(config.liveclients < config.numclients) {
         createClient(NULL,0,c);
 
@@ -424,7 +450,9 @@ static void benchmark(char *title, char *cmd, int len) {
     config.requests_issued = 0;
     config.requests_finished = 0;
 
+    // 创建第一个client
     c = createClient(cmd,len,NULL);
+    // 执行下一步（是否创建新的client？）
     createMissingClients(c);
 
     config.start = mstime();
@@ -586,7 +614,7 @@ int test_is_selected(char *name) {
     buf[l+2] = '\0';
     return strstr(config.tests,buf) != NULL;
 }
-
+// 将要测试的命令 例如SET key value ->
 int main(int argc, const char **argv) {
     int i;
     char *data, *cmd;
@@ -620,6 +648,7 @@ int main(int argc, const char **argv) {
     config.tests = NULL;
     config.dbnum = 0;
 
+    // 解析参数
     i = parseOptions(argc,argv);
     argc -= i;
     argv += i;

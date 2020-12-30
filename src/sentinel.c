@@ -1,31 +1,4 @@
 /* Redis Sentinel implementation
- *
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *   * Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "redis.h"
@@ -363,16 +336,15 @@ typedef struct sentinelRedisInstance {
 
 } sentinelRedisInstance;
 
-/* Main state. */
 /* Sentinel 的状态结构 */
+// 声明+定义
 struct sentinelState {
 
     // 当前纪元
     uint64_t current_epoch;     /* Current epoch. */
 
     // 保存了所有被这个 sentinel 监视的主服务器
-    // 字典的键是主服务器的名字
-    // 字典的值则是一个指向 sentinelRedisInstance 结构的指针
+    // 字典的键是主服务器的名字;字典的值则是一个指向 sentinelRedisInstance 结构的指针
     dict *masters;      /* Dictionary of master sentinelRedisInstances.
                            Key is the instance name, value is the
                            sentinelRedisInstance structure pointer. */
@@ -638,12 +610,9 @@ void initSentinelConfig(void) {
 void initSentinel(void) {
     int j;
 
-    /* Remove usual Redis commands from the command table, then just add
-     * the SENTINEL command. */
-
     // 清空 Redis 服务器的命令表（该表用于普通模式）
     dictEmpty(server.commands,NULL);
-    // 将 SENTINEL 模式所用的命令添加进命令表
+    // 将 SENTINEL 模式所用（支持）的命令添加进命令表
     for (j = 0; j < sizeof(sentinelcmds)/sizeof(sentinelcmds[0]); j++) {
         int retval;
         struct redisCommand *cmd = sentinelcmds+j;
@@ -652,9 +621,8 @@ void initSentinel(void) {
         redisAssert(retval == DICT_OK);
     }
 
-    /* Initialize various data structures. */
-    /* 初始化 Sentinel 的状态 */
-    // 初始化纪元
+    /* 初始化sentinelState（Sentinel的状态） */
+    // epoch
     sentinel.current_epoch = 0;
 
     // 初始化保存主服务器信息的字典
@@ -1252,14 +1220,12 @@ void sentinelCallClientReconfScript(sentinelRedisInstance *master, int role, cha
  * If SRI_MASTER is set into initial flags the instance is added to
  * sentinel.masters table.
  *
- * 如果 flags 参数为 SRI_MASTER ，
- * 那么这个实例会被添加到 sentinel.masters 表。
+ * 如果 flags 参数为 SRI_MASTER，那么这个实例会被添加到 sentinel.masters 表。
  *
  * if SRI_SLAVE or SRI_SENTINEL is set then 'master' must be not NULL and the
  * instance is added into master->slaves or master->sentinels table.
  *
- * 如果 flags 为 SRI_SLAVE 或者 SRI_SENTINEL ，
- * 那么 master 参数不能为 NULL ，
+ * 如果 flags 为 SRI_SLAVE 或者 SRI_SENTINEL，那么 master 参数不能为 NULL ，
  * SRI_SLAVE 类型的实例会被添加到 master->slaves 表中，
  * 而 SRI_SENTINEL 类型的实例则会被添加到 master->sentinels 表中。
  *
@@ -2958,25 +2924,20 @@ void sentinelReceiveHelloMessages(redisAsyncContext *c, void *reply, void *privd
  * instance in order to broadcast the current configuraiton for this
  * master, and to advertise the existence of this Sentinel at the same time.
  *
- * 向给定 ri 实例的频道发送信息，
- * 从而传播关于给定主服务器的配置，
- * 并向其他 Sentinel 宣告本 Sentinel 的存在。
- *
  * The message has the following format:
- *
- * 发送信息的格式如下： 
  *
  * sentinel_ip,sentinel_port,sentinel_runid,current_epoch,
  * master_name,master_ip,master_port,master_config_epoch.
  *
- * Sentinel IP,Sentinel 端口号,Sentinel 的运行 ID,Sentinel 当前的纪元,
- * 主服务器的名称,主服务器的 IP,主服务器的端口号,主服务器的配置纪元.
- *
  * Returns REDIS_OK if the PUBLISH was queued correctly, otherwise
  * REDIS_ERR is returned. 
- *
+ * 向给定 ri 实例的频道发送信息，从而传播关于给定主服务器的配置，并向其他 Sentinel 宣告本 Sentinel 的存在。
+ * 发送信息的格式如下：
+ * Sentinel IP,Sentinel 端口号,Sentinel 的运行 ID,Sentinel 当前的纪元,
+ * 主服务器的名称,主服务器的 IP,主服务器的端口号,主服务器的配置纪元.
  * PUBLISH 命令成功入队时返回 REDIS_OK ，
  * 否则返回 REDIS_ERR 。
+ *
  */
 int sentinelSendHello(sentinelRedisInstance *ri) {
     char ip[REDIS_IP_STR_LEN];
@@ -3690,7 +3651,7 @@ void sentinelPublishCommand(redisClient *c) {
 /* ===================== SENTINEL availability checks ======================= */
 
 /* Is this instance down from our point of view? */
-// 检查实例是否以下线（从本 Sentinel 的角度来看）
+// 检查实例是否以下线（主观下线判断）
 void sentinelCheckSubjectivelyDown(sentinelRedisInstance *ri) {
 
     mstime_t elapsed = 0;
@@ -3849,8 +3810,7 @@ void sentinelCheckObjectivelyDown(sentinelRedisInstance *master) {
 
 /* Receive the SENTINEL is-master-down-by-addr reply, see the
  * sentinelAskMasterStateToOtherSentinels() function for more information. */
-// 本回调函数用于处理SENTINEL 接收到其他 SENTINEL 
-// 发回的 SENTINEL is-master-down-by-addr 命令的回复
+// 本回调函数用于处理SENTINEL 接收到其他 SENTINEL发回的 SENTINEL is-master-down-by-addr 命令的回复
 void sentinelReceiveIsMasterDownReply(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = c->data;
     redisReply *r;
@@ -4218,6 +4178,9 @@ void sentinelStartFailover(sentinelRedisInstance *master) {
 /* This function checks if there are the conditions to start the failover,
  * that is:
  *
+ * We still don't know if we'll win the election so it is possible that we
+ * start the failover but that we'll not be able to act.
+ * Return non-zero if a failover was started.
  * 这个函数检查是否需要开始一次故障转移操作：
  *
  * 1) Master must be in ODOWN condition.
@@ -4227,15 +4190,9 @@ void sentinelStartFailover(sentinelRedisInstance *master) {
  * 3) No failover already attempted recently.
  *    最近时间内，这个主服务器没有尝试过执行故障转移
  *    （应该是为了防止频繁执行）。
- * 
- * We still don't know if we'll win the election so it is possible that we
- * start the failover but that we'll not be able to act.
  *
  * 虽然 Sentinel 可以发起一次故障转移，但因为故障转移操作是由领头 Sentinel 执行的，
  * 所以发起故障转移的 Sentinel 不一定就是执行故障转移的 Sentinel 。
- *
- * Return non-zero if a failover was started. 
- *
  * 如果故障转移操作成功开始，那么函数返回非 0 值。
  */
 int sentinelStartFailoverIfNeeded(sentinelRedisInstance *master) {
@@ -4522,8 +4479,7 @@ void sentinelFailoverSelectSlave(sentinelRedisInstance *ri) {
     }
 }
 
-// 向被选中的从服务器发送 SLAVEOF no one 命令
-// 将它升级为新的主服务器
+// 向被选中的从服务器发送 SLAVEOF no one 命令，将它升级为新的主服务器
 void sentinelFailoverSendSlaveOfNoOne(sentinelRedisInstance *ri) {
     int retval;
 
@@ -4571,8 +4527,7 @@ void sentinelFailoverSendSlaveOfNoOne(sentinelRedisInstance *ri) {
 
 /* We actually wait for promotion indirectly checking with INFO when the
  * slave turns into a master. */
-// Sentinel 会通过 INFO 命令的回复检查从服务器是否已经转变为主服务器
-// 这里只负责检查时限
+// Sentinel 会通过 INFO 命令的回复检查从服务器是否已经转变为主服务器，这里只负责检查时限
 void sentinelFailoverWaitPromotion(sentinelRedisInstance *ri) {
     /* Just handle the timeout. Switching to the next state is handled
      * by the function parsing the INFO command of the promoted slave. */
@@ -4873,8 +4828,8 @@ void sentinelHandleRedisInstance(sentinelRedisInstance *ri) {
         sentinelEvent(REDIS_WARNING,"-tilt",NULL,"#tilt mode exited");
     }
 
-    /* Every kind of instance */
-    // 检查给定实例是否进入 SDOWN 状态
+    // 所有instance(主服务器、从服务器、Sentinel)
+    // 检查给定实例是否进入主观下线SDOWN
     sentinelCheckSubjectivelyDown(ri);
 
     /* Masters and slaves */
@@ -4882,11 +4837,10 @@ void sentinelHandleRedisInstance(sentinelRedisInstance *ri) {
         /* Nothing so far. */
     }
 
-    /* Only masters */
-    /* 对主服务器进行处理 */
+    /* 仅对主服务器进行的处理 */
     if (ri->flags & SRI_MASTER) {
 
-        // 判断 master 是否进入 ODOWN 状态
+        // 判断 master 是否进入客观下线ODOWN
         sentinelCheckObjectivelyDown(ri);
 
         // 如果主服务器进入了 ODOWN 状态，那么开始一次故障转移操作
@@ -4908,8 +4862,7 @@ void sentinelHandleRedisInstance(sentinelRedisInstance *ri) {
 
 /* Perform scheduled operations for all the instances in the dictionary.
  * Recursively call the function against dictionaries of slaves. */
-// 对被 Sentinel 监视的所有实例（包括主服务器、从服务器和其他 Sentinel ）
-// 进行定期操作
+// 对被 Sentinel 监视的所有实例（包括主服务器、从服务器和其他 Sentinel ）进行定期操作
 //
 //  sentinelHandleRedisInstance
 //              |
@@ -4936,8 +4889,7 @@ void sentinelHandleDictOfRedisInstances(dict *instances) {
         // 执行调度操作
         sentinelHandleRedisInstance(ri);
 
-        // 如果被遍历的是主服务器，那么递归地遍历该主服务器的所有从服务器
-        // 以及所有 sentinel
+        // 如果被遍历的是主服务器，那么递归地遍历该主服务器的所有从服务器以及所有 sentinel
         if (ri->flags & SRI_MASTER) {
 
             // 所有从服务器
