@@ -52,7 +52,7 @@ start_server {tags {"other"}} {
     test {SELECT an out of range DB} {
         catch {r select 1000000} err
         set _ $err
-    } {*invalid*}
+    } {*index is out of range*}
 
     tags {consistency} {
         if {![catch {package require sha1}]} {
@@ -83,6 +83,7 @@ start_server {tags {"other"}} {
             } {1}
 
             test {Same dataset digest if saving/reloading as AOF?} {
+                r config set aof-use-rdb-preamble no
                 r bgrewriteaof
                 waitForBgrewriteaof r
                 r debug loadaof
@@ -126,6 +127,7 @@ start_server {tags {"other"}} {
     test {EXPIRES after AOF reload (without rewrite)} {
         r flushdb
         r config set appendonly yes
+        r config set aof-use-rdb-preamble no
         r set x somevalue
         r expire x 1000
         r setex y 2000 somevalue
@@ -164,7 +166,11 @@ start_server {tags {"other"}} {
 
     tags {protocol} {
         test {PIPELINING stresser (also a regression for the old epoll bug)} {
-            set fd2 [socket $::host $::port]
+            if {$::tls} {
+                set fd2 [::tls::socket [srv host] [srv port]]
+            } else {
+                set fd2 [socket [srv host] [srv port]]
+            }
             fconfigure $fd2 -encoding binary -translation binary
             puts -nonewline $fd2 "SELECT 9\r\n"
             flush $fd2
@@ -194,6 +200,7 @@ start_server {tags {"other"}} {
     }
 
     test {APPEND basics} {
+        r del foo
         list [r append foo bar] [r get foo] \
              [r append foo 100] [r get foo]
     } {3 bar 6 bar100}
@@ -242,4 +249,24 @@ start_server {tags {"other"}} {
         waitForBgsave r
         r save
     } {OK}
+}
+
+start_server {tags {"other"}} {
+    test {Don't rehash if redis has child proecess} {
+        r config set save ""
+        r config set rdb-key-save-delay 1000000
+
+        populate 4096 "" 1
+        r bgsave
+        r mset k1 v1 k2 v2
+        # Hash table should not rehash
+        assert_no_match "*table size: 8192*" [r debug HTSTATS 9]
+        exec kill -9 [get_child_pid 0]
+        after 200
+
+        # Hash table should rehash since there is no child process,
+        # size is power of two and over 4098, so it is 16384
+        r set k3 v3
+        assert_match "*table size: 16384*" [r debug HTSTATS 9]
+    }
 }

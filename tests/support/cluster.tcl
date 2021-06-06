@@ -58,17 +58,18 @@ proc ::redis_cluster::__method__refresh_nodes_map {id} {
     set idx 0; # Index of the node that will respond.
     set errmsg {}
     foreach start_node $::redis_cluster::startup_nodes($id) {
-        lassign [split $start_node :] start_host start_port
+        set ip_port [lindex [split $start_node @] 0]
+        lassign [split $ip_port :] start_host start_port
         if {[catch {
             set r {}
-            set r [redis $start_host $start_port]
+            set r [redis $start_host $start_port 0 $::tls]
             set nodes_descr [$r cluster nodes]
             $r close
         } e]} {
             if {$r ne {}} {catch {$r close}}
             incr idx
             if {[string length $errmsg] < 200} {
-                append errmsg " $start_node: $e"
+                append errmsg " $ip_port: $e"
             }
             continue ; # Try next.
         } else {
@@ -98,6 +99,7 @@ proc ::redis_cluster::__method__refresh_nodes_map {id} {
         set args [split $line " "]
         lassign $args nodeid addr flags slaveof pingsent pongrecv configepoch linkstate
         set slots [lrange $args 8 end]
+        set addr [lindex [split $addr @] 0]
         if {$addr eq {:0}} {
             set addr $start_host:$start_port
         }
@@ -105,7 +107,7 @@ proc ::redis_cluster::__method__refresh_nodes_map {id} {
 
         # Connect to the node
         set link {}
-        catch {set link [redis $host $port]}
+        catch {set link [redis $host $port 0 $::tls]}
 
         # Build this node description as an hash.
         set node [dict create \
@@ -226,6 +228,8 @@ proc ::redis_cluster::get_keys_from_command {cmd argv} {
     # Special handling for other commands
     switch -exact $cmd {
         mget {return $argv}
+        eval {return [lrange $argv 2 1+[lindex $argv 1]]}
+        evalsha {return [lrange $argv 2 1+[lindex $argv 1]]}
     }
 
     # All the remaining commands are not handled.
@@ -282,8 +286,29 @@ proc ::redis_cluster::crc16 {s} {
 # Hash a single key returning the slot it belongs to, Implemented hash
 # tags as described in the Redis Cluster specification.
 proc ::redis_cluster::hash {key} {
-    # TODO: Handle hash slots.
-    expr {[::redis_cluster::crc16 $key] & 16383}
+    set keylen [string length $key]
+    set s {}
+    set e {}
+    for {set s 0} {$s < $keylen} {incr s} {
+        if {[string index $key $s] eq "\{"} break
+    }
+
+    if {[expr {$s == $keylen}]} {
+        set res [expr {[crc16 $key] & 16383}]
+        return $res
+    }
+
+    for {set e [expr {$s+1}]} {$e < $keylen} {incr e} {
+        if {[string index $key $e] == "\}"} break
+    }
+
+    if {$e == $keylen || $e == [expr {$s+1}]} {
+        set res [expr {[crc16 $key] & 16383}]
+        return $res
+    }
+
+    set key_sub [string range $key [expr {$s+1}] [expr {$e-1}]]
+    return [expr {[crc16 $key_sub] & 16383}]
 }
 
 # Return the slot the specified keys hash to.
