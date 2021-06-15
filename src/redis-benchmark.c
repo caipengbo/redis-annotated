@@ -648,6 +648,7 @@ static client createClient(char *cmd, size_t len, client from, int thread_id) {
             fprintf(stderr,"%s: %s\n",config.hostsocket,c->context->errstr);
         exit(1);
     }
+    // 指定thread id
     c->thread_id = thread_id;
     /* Suppress hiredis cleanup of unused buffers for max speed. */
     c->context->reader->maxbuf = 0;
@@ -783,6 +784,7 @@ static client createClient(char *cmd, size_t len, client from, int thread_id) {
 
 static void createMissingClients(client c) {
     int n = 0;
+    // 指定总的client数目，均匀的分给各个线程（指定client中的thread_id）
     while(config.liveclients < config.numclients) {
         int thread_id = -1;
         if (config.num_threads)
@@ -897,6 +899,7 @@ static void startBenchmarkThreads() {
             exit(1);
         }
     }
+    // 等待所有线程运行完毕
     for (i = 0; i < config.num_threads; i++)
         pthread_join(config.threads[i]->thread, NULL);
 }
