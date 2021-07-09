@@ -72,9 +72,11 @@ static struct config {
     const char *hostsocket;
     int numclients;
     int liveclients;
+    // 请求数统计
     int requests;
     int requests_issued;
     int requests_finished;
+
     int keysize;
     int datasize;
     int randomkeys;
@@ -140,7 +142,6 @@ typedef struct _client {
 } *client;
 
 /* Threads. */
-
 typedef struct benchmarkThread {
     int index;
     pthread_t thread;
@@ -560,9 +561,13 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     /* Initialize request when nothing was written. */
     if (c->written == 0) {
         /* Enforce upper bound to number of requests. */
+        // 发出的请求
         int requests_issued = 0;
+        // config.requests_issued 原子性+1, 旧值保存在 requests_issued 中
         atomicGetIncr(config.requests_issued, requests_issued, 1);
+        // 发出的请求 > 配置的总请求数目
         if (requests_issued >= config.requests) {
+            // 释放该客户端
             freeClient(c);
             return;
         }

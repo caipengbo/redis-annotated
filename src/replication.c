@@ -582,6 +582,7 @@ int masterTryPartialResynchronization(client *c) {
     /* We can't use the connection buffers since they are used to accumulate
      * new commands at this stage. But we are sure the socket send buffer is
      * empty so this write will never fail actually. */
+    // 如果支持 psync2 将会夹带 replid 信息给 slave
     if (c->slave_capa & SLAVE_CAPA_PSYNC2) {
         buflen = snprintf(buf,sizeof(buf),"+CONTINUE %s\r\n", server.replid);
     } else {
