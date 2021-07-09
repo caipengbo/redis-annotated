@@ -23,6 +23,7 @@
 #define RANDPTR_INITIAL_SIZE 8
 
 static struct config {
+    // 所有 client 的时间都在此 eventloop 上 
     aeEventLoop *el;
     const char *hostip;
     int hostport;
@@ -31,18 +32,18 @@ static struct config {
     // 已经创建的存活的client
     int liveclients;
     // 每个test suite要执行的request数目
-    int requests;
-    int requests_issued;
-    int requests_finished;
+    int requests;  // 总共需要发送的redis请求数（命令数）
+    int requests_issued;  // 发出的请求（如果设置pipeline的话，客户端发送一次请求，服务器可能会收到pipeline个回复）
+    int requests_finished;  // 收到的回复
     int keysize;
     int datasize;
     int randomkeys;
-    int randomkeys_keyspacelen;
+    int randomkeys_keyspacelen;  // key 的最大数目
     int keepalive;
     int pipeline;
     long long start;
     long long totlatency;
-    // 延时数组，index是每个请求的index，值是该request的延时
+    // latency数组，index是每个已经finished的请求，值是该request的延时
     long long *latency;
     const char *title;
     list *clients;
@@ -57,11 +58,11 @@ static struct config {
 
 // 一个请求客户端
 typedef struct _client {
-    //redis上下文
+    //redis上下文(hiredis)
     redisContext *context;
     // 缓冲区
     sds obuf;
-    //rand指针数组
+    //rand 指针数组
     char **randptr;         /* Pointers to :rand: strings inside the command buf */
     size_t randlen;         /* Number of pointers in client->randptr */
     size_t randfree;        /* Number of unused pointers in client->randptr */
@@ -71,7 +72,7 @@ typedef struct _client {
     long long latency;      /* Request latency */
     // 当前客户端正在等待的request（流水线可以有多个request）
     int pending;            /* Number of pending requests (replies to consume) */
-    // 流水线机制
+    // 前缀的长度
     int selectlen;  /* If non-zero, a SELECT of 'selectlen' bytes is currently
                        used as a prefix of the pipline of commands. This gets
                        discarded the first time it's sent. */
@@ -137,7 +138,7 @@ static void resetClient(client c) {
     c->pending = config.pipeline;
 }
 
-// 将key进行随机化
+// 将当前客户端的key（randptr）进行随机化
 static void randomizeClientKey(client c) {
     size_t i;
 
@@ -145,7 +146,7 @@ static void randomizeClientKey(client c) {
         char *p = c->randptr[i]+11;
         size_t r = random() % config.randomkeys_keyspacelen;
         size_t j;
-
+        // 从后往前为每一个 randptr 赋值（一个12位的随机整数）
         for (j = 0; j < 12; j++) {
             *p = '0'+r%10;
             r/=10;
@@ -217,7 +218,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     c->selectlen = 0;
                     continue;
                 }
-                // 当前请求完成，记录下来响应时间 latency
+                // 当前请求彻底处理完成，记录已经完成的请求的响应时间 latency
                 if (config.requests_finished < config.requests)
                     config.latency[config.requests_finished++] = c->latency;
                 c->pending--;
@@ -265,7 +266,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         c->written += nwritten;
-        // obuf被发送（write到socket）完了，创建读事件（等待回复）
+        // obuf被写满（write到socket），删除写事件、创建读事件（等待回复）
         if (sdslen(c->obuf) == c->written) {
             aeDeleteFileEvent(config.el,c->context->fd,AE_WRITABLE);
             aeCreateFileEvent(config.el,c->context->fd,AE_READABLE,readHandler,c);
@@ -299,7 +300,7 @@ static client createClient(char *cmd, size_t len, client from) {
     int j;
     client c = zmalloc(sizeof(struct _client));
 
-    // 创建socket连接
+    // 通过 hiredis 创建 redis 连接（创建socket连接）
     if (config.hostsocket == NULL) {
         c->context = redisConnectNonBlock(config.hostip,config.hostport);
     } else {
@@ -325,6 +326,7 @@ static client createClient(char *cmd, size_t len, client from) {
      * buffer with the SELECT command, that will be discarded the first
      * time the replies are received, so if the client is reused the
      * SELECT command will not be used again. */
+    // 如果涉及多个db, 为了区分每个命令要发送的db,需要在命令里面加入 SELECT
     if (config.dbnum != 0) {
         c->obuf = sdscatprintf(c->obuf,"*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n",
             (int)sdslen(config.dbnumstr),config.dbnumstr);
@@ -337,12 +339,13 @@ static client createClient(char *cmd, size_t len, client from) {
     if (from) {
         c->obuf = sdscatlen(c->obuf,from->obuf+from->selectlen,sdslen(from->obuf)-from->selectlen);
     } else {
+        // 重复 pipeline 次发送当前请求
         for (j = 0; j < config.pipeline; j++) {
             c->obuf = sdscatlen(c->obuf,cmd,len);
         }
     }
     c->written = 0;
-    // 同时发送多个请求
+    // 同时发送 pipeline 个请求
     c->pending = config.pipeline;
     c->randptr = NULL;
     c->randlen = 0;
@@ -356,8 +359,10 @@ static client createClient(char *cmd, size_t len, client from) {
             c->randptr = zmalloc(sizeof(char*)*c->randlen);
             /* copy the offsets. */
             for (j = 0; j < c->randlen; j++) {
+                // 找到 obuf 上 randptr 开始的地方
                 c->randptr[j] = c->obuf + (from->randptr[j]-from->obuf);
                 /* Adjust for the different select prefix length. */
+                // 调整 randptr 其实位置（受SELECT前缀的影响）
                 c->randptr[j] += c->selectlen - from->selectlen;
             }
         } else {
@@ -366,7 +371,7 @@ static client createClient(char *cmd, size_t len, client from) {
             c->randlen = 0;
             c->randfree = RANDPTR_INITIAL_SIZE;
             c->randptr = zmalloc(sizeof(char*)*c->randfree);
-            // strstr: 首次出现的位置
+            // strstr: 首次出现 __rand_int__ 的子字符串
             while ((p = strstr(p,"__rand_int__")) != NULL) {
                 if (c->randfree == 0) {
                     c->randptr = zrealloc(c->randptr,sizeof(char*)*c->randlen*2);
@@ -386,6 +391,7 @@ static client createClient(char *cmd, size_t len, client from) {
 }
 
 // 当前client发送过了命令之后
+// 判断是否补充新 client
 static void createMissingClients(client c) {
     int n = 0;
     char *buf = c->obuf;
@@ -402,6 +408,7 @@ static void createMissingClients(client c) {
         createClient(NULL,0,c);
 
         /* Listen backlog is quite limited on most systems */
+        // 当频繁产生client的时候，sleep一下
         if (++n > 64) {
             usleep(50000);
             n = 0;
@@ -452,11 +459,12 @@ static void benchmark(char *title, char *cmd, int len) {
 
     // 创建第一个client
     c = createClient(cmd,len,NULL);
-    // 执行下一步（是否创建新的client？）
+    // 是否创建更多的 client
     createMissingClients(c);
 
     config.start = mstime();
     aeMain(config.el);
+    // 总延迟
     config.totlatency = mstime()-config.start;
 
     showLatencyReport();
