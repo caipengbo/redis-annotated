@@ -72,7 +72,7 @@ static struct config {
     const char *hostsocket;
     int numclients;
     int liveclients;
-    // 请求数统计
+    // 请求数统计(原子性操作)
     int requests;
     int requests_issued;
     int requests_finished;
@@ -136,7 +136,7 @@ typedef struct _client {
                                such as auth and select are prefixed to the pipeline of
                                benchmark commands and discarded after the first send. */
     int prefixlen;          /* Size in bytes of the pending prefix commands */
-    int thread_id;
+    int thread_id;          // 标识属于哪个线程
     struct clusterNode *cluster_node;
     int slots_last_update;
 } *client;
@@ -440,12 +440,13 @@ static void clientDone(client c) {
         resetClient(c);
     } else {
         if (config.num_threads) pthread_mutex_lock(&(config.liveclients_mutex));
-        config.liveclients--;
-        createMissingClients(c);
-        config.liveclients++;
+        // 先创建，再释放，这样可以从旧的 client 中 copy 内容
+        config.liveclients--;    // 先 -1 尝试判断然后判断是否需要补新的 client
+        createMissingClients(c); // 补 client 
+        config.liveclients++;    // 加回来
         if (config.num_threads)
             pthread_mutex_unlock(&(config.liveclients_mutex));
-        freeClient(c);
+        freeClient(c);           // 真正的释放，liveclients++
     }
 }
 
@@ -461,11 +462,13 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
      * is not part of the latency, so calculate it only once, here. */
     if (c->latency < 0) c->latency = ustime()-(c->start);
 
+    // 从hiredis中读数据
     if (redisBufferRead(c->context) != REDIS_OK) {
         fprintf(stderr,"Error: %s\n",c->context->errstr);
         exit(1);
     } else {
         while(c->pending) {
+            // 获得 reply 
             if (redisGetReply(c->context,&reply) != REDIS_OK) {
                 fprintf(stderr,"Error: %s\n",c->context->errstr);
                 exit(1);
@@ -552,6 +555,8 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 }
 
+// 写到 Redis 客户端里面
+// 只要 fd 的缓冲区有内容，就会一直触发该事件，会一直回调该函数
 static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     client c = privdata;
     UNUSED(el);
@@ -581,6 +586,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
     if (sdslen(c->obuf) > c->written) {
         void *ptr = c->obuf+c->written;
+        // 将数据写到Redis客户端
         ssize_t nwritten = write(c->context->fd,ptr,sdslen(c->obuf)-c->written);
         if (nwritten == -1) {
             if (errno != EPIPE)
@@ -589,6 +595,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         c->written += nwritten;
+        // 数据全都写到 Redis 客户端了，删除该事件，然后
         if (sdslen(c->obuf) == c->written) {
             aeDeleteFileEvent(el,c->context->fd,AE_WRITABLE);
             aeCreateFileEvent(el,c->context->fd,AE_READABLE,readHandler,c);
@@ -625,6 +632,7 @@ static client createClient(char *cmd, size_t len, client from, int thread_id) {
     const char *ip = NULL;
     int port = 0;
     c->cluster_node = NULL;
+    // 连接 hiredis
     if (config.hostsocket == NULL || is_cluster_client) {
         if (!is_cluster_client) {
             ip = config.hostip;
@@ -773,14 +781,18 @@ static client createClient(char *cmd, size_t len, client from, int thread_id) {
             }
         }
     }
+    
+    // 区分不同的线程
     aeEventLoop *el = NULL;
     if (thread_id < 0) el = config.el;
     else {
         benchmarkThread *thread = config.threads[thread_id];
         el = thread->el;
     }
+    // 创建可写事件，将数据写入到 hiredis
     if (config.idlemode == 0)
         aeCreateFileEvent(el,c->context->fd,AE_WRITABLE,writeHandler,c);
+    
     listAddNodeTail(config.clients,c);
     atomicIncr(config.liveclients, 1);
     atomicGet(config.slots_last_update, c->slots_last_update);
@@ -789,7 +801,7 @@ static client createClient(char *cmd, size_t len, client from, int thread_id) {
 
 static void createMissingClients(client c) {
     int n = 0;
-    // 指定总的client数目，均匀的分给各个线程（指定client中的thread_id）
+    // 指定总的 client 数目，均匀的分给各个线程（指定client中的thread_id）
     while(config.liveclients < config.numclients) {
         int thread_id = -1;
         if (config.num_threads)
@@ -897,6 +909,7 @@ static void initBenchmarkThreads() {
 
 static void startBenchmarkThreads() {
     int i;
+    // 启动所有的线程
     for (i = 0; i < config.num_threads; i++) {
         benchmarkThread *t = config.threads[i];
         if (pthread_create(&(t->thread), NULL, execBenchmarkThread, t)){
@@ -923,8 +936,8 @@ static void benchmark(char *title, char *cmd, int len) {
     createMissingClients(c);
 
     config.start = mstime();
-    if (!config.num_threads) aeMain(config.el);
-    else startBenchmarkThreads();
+    if (!config.num_threads) aeMain(config.el);  // 单线程
+    else startBenchmarkThreads();  // 多线程
     config.totlatency = mstime()-config.start;
 
     showLatencyReport();
@@ -1494,6 +1507,7 @@ int showThroughput(struct aeEventLoop *eventLoop, long long id, void *clientData
         fprintf(stderr,"All clients disconnected... aborting.\n");
         exit(1);
     }
+    // 检查是否接收的回复数，是否达到了总请求数
     if (config.num_threads && requests_finished >= config.requests) {
         aeStop(eventLoop);
         return AE_NOMORE;

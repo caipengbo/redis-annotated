@@ -100,11 +100,12 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
         kevent(state->kqfd, &ke, 1, NULL, 0, NULL);
     }
 }
-
+// Poll 
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;
 
+    // 带超时时间
     if (tvp != NULL) {
         struct timespec timeout;
         timeout.tv_sec = tvp->tv_sec;
@@ -120,6 +121,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
         int j;
 
         numevents = retval;
+        // 将就绪的事件放入 fired
         for(j = 0; j < numevents; j++) {
             int mask = 0;
             struct kevent *e = state->events+j;

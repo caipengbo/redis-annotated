@@ -64,6 +64,7 @@ struct aeEventLoop;
 
 /* Types and data structures */
 typedef void aeFileProc(struct aeEventLoop *eventLoop, int fd, void *clientData, int mask);
+// 时间事件的处理函数，返回值是-1是非循环事件，返回值不为-1代表下一次触发的时间，
 typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *clientData);
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
@@ -81,9 +82,12 @@ typedef struct aeTimeEvent {
     long long id; /* time event identifier. */
     long when_sec; /* seconds */
     long when_ms; /* milliseconds */
+    // 处理函数
     aeTimeProc *timeProc;
+    // 终结函数
     aeEventFinalizerProc *finalizerProc;
     void *clientData;
+    // 链表
     struct aeTimeEvent *prev;
     struct aeTimeEvent *next;
     int refcount; /* refcount to prevent timer events from being
@@ -92,6 +96,7 @@ typedef struct aeTimeEvent {
 
 /* A fired event */
 typedef struct aeFiredEvent {
+    // 记录 fd 和 事件类型
     int fd;
     int mask;
 } aeFiredEvent;
@@ -102,13 +107,14 @@ typedef struct aeEventLoop {
     int setsize; /* max number of file descriptors tracked */
     long long timeEventNextId;
     time_t lastTime;     /* Used to detect system clock skew */
+    // 下标表示fd
     aeFileEvent *events; /* Registered events */
     aeFiredEvent *fired; /* Fired events */
     aeTimeEvent *timeEventHead;
     int stop;
     void *apidata; /* This is used for polling API specific data */
-    aeBeforeSleepProc *beforesleep;
-    aeBeforeSleepProc *aftersleep;
+    aeBeforeSleepProc *beforesleep;  // Poll 执行前的逻辑
+    aeBeforeSleepProc *aftersleep;  // Poo 执行后
     int flags;
 } aeEventLoop;
 

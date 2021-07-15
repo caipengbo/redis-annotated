@@ -150,6 +150,7 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+// 注册文件事件
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
@@ -157,10 +158,13 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         errno = ERANGE;
         return AE_ERR;
     }
+    // 获得该 fd 索引下的 events数组元素（事件）
     aeFileEvent *fe = &eventLoop->events[fd];
 
+    // 添加到 IO 多路复用函数的结构中
     if (aeApiAddEvent(eventLoop, fd, mask) == -1)
         return AE_ERR;
+    // 对该事件进行进行赋值
     fe->mask |= mask;
     if (mask & AE_READABLE) fe->rfileProc = proc;
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
@@ -207,10 +211,10 @@ static void aeGetTime(long *seconds, long *milliseconds)
     *seconds = tv.tv_sec;
     *milliseconds = tv.tv_usec/1000;
 }
-
+// now(sec, ms) + milliseconds
 static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) {
     long cur_sec, cur_ms, when_sec, when_ms;
-
+    // 获得当前时间
     aeGetTime(&cur_sec, &cur_ms);
     when_sec = cur_sec + milliseconds/1000;
     when_ms = cur_ms + milliseconds%1000;
@@ -232,11 +236,13 @@ long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
     te = zmalloc(sizeof(*te));
     if (te == NULL) return AE_ERR;
     te->id = id;
+    // 下一次触发的时间，当前时间 + milliseconds
     aeAddMillisecondsToNow(milliseconds,&te->when_sec,&te->when_ms);
     te->timeProc = proc;
     te->finalizerProc = finalizerProc;
     te->clientData = clientData;
     te->prev = NULL;
+    // 头插
     te->next = eventLoop->timeEventHead;
     te->refcount = 0;
     if (te->next)
@@ -310,6 +316,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
 
     te = eventLoop->timeEventHead;
     maxId = eventLoop->timeEventNextId-1;
+    // 每次都遍历一遍时间事件链表
     while(te) {
         long now_sec, now_ms;
         long long id;
@@ -346,6 +353,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
             te = te->next;
             continue;
         }
+        // 当触发时间比遍历到的时间小的时候，处理该事件
         aeGetTime(&now_sec, &now_ms);
         if (now_sec > te->when_sec ||
             (now_sec == te->when_sec && now_ms >= te->when_ms))
@@ -358,11 +366,14 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
             te->refcount--;
             processed++;
             if (retval != AE_NOMORE) {
+                // 再次添加该（循环）事件, 因为是头插，所以可以继续往下遍历链表
                 aeAddMillisecondsToNow(retval,&te->when_sec,&te->when_ms);
             } else {
+                // 该事件为非循环事件，标记为删除，下一次遍历再遍历到的时候会将其删除
                 te->id = AE_DELETED_EVENT_ID;
             }
         }
+        // 继续往后遍历
         te = te->next;
     }
     return processed;
@@ -394,6 +405,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
+    // IO多路复用函数阻塞时间为：下一次时间事件的时间
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
         int j;
@@ -444,12 +456,14 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
         /* Call the multiplexing API, will return only on timeout or when
          * some event fires. */
+        // 阻塞，监听事件
         numevents = aeApiPoll(eventLoop, tvp);
 
         /* After sleep callback. */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
+        // 取出所有就绪的事件，调用事件的处理函数
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
             int mask = eventLoop->fired[j].mask;
@@ -467,6 +481,8 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * This is useful when, for instance, we want to do things
              * in the beforeSleep() hook, like fsyncing a file to disk,
              * before replying to a client. */
+            
+            // 先处理读事件，然后处理写事件，如果设置了 AE_BARRIER 则翻过来
             int invert = fe->mask & AE_BARRIER;
 
             /* Note the "fe->mask & mask & ..." code: maybe an already
@@ -513,6 +529,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
 /* Wait for milliseconds until the given file descriptor becomes
  * writable/readable/exception */
+// 监听一个 fd
 int aeWait(int fd, int mask, long long milliseconds) {
     struct pollfd pfd;
     int retmask = 0, retval;
