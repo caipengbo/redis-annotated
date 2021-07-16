@@ -44,8 +44,10 @@ struct _rio {
     /* Backend functions.
      * Since this functions do not tolerate short writes or reads the return
      * value is simplified to: zero on error, non zero on complete success. */
+    // 对于各种类型数据存储对象的读写、移动指针以及刷新的函数指针
     size_t (*read)(struct _rio *, void *buf, size_t len);
     size_t (*write)(struct _rio *, const void *buf, size_t len);
+    // 当前文件的指针
     off_t (*tell)(struct _rio *);
     int (*flush)(struct _rio *);
     /* The update_cksum method if not NULL is used to compute the checksum of
@@ -53,6 +55,7 @@ struct _rio {
      * designed so that can be called with the current checksum, and the buf
      * and len fields pointing to the new block of data to add to the checksum
      * computation. */
+    // 如果这个方法不为空，用来计算所有被读写数据的checksum
     void (*update_cksum)(struct _rio *, const void *buf, size_t len);
 
     /* The current checksum and flags (see RIO_FLAG_*) */
