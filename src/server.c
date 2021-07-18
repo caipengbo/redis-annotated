@@ -5123,6 +5123,7 @@ void closeClildUnusedResourceAfterFork() {
 }
 
 /* purpose is one of CHILD_TYPE_ types */
+// 对 fork 进行一次封装
 int redisFork(int purpose) {
     int childpid;
     long long start = ustime();
@@ -5130,10 +5131,11 @@ int redisFork(int purpose) {
         /* Child */
         server.in_fork_child = purpose;
         setOOMScoreAdj(CONFIG_OOM_BGCHILD);
-        setupChildSignalHandlers();
-        closeClildUnusedResourceAfterFork();
+        setupChildSignalHandlers();  // 捕获子进程的信号
+        closeClildUnusedResourceAfterFork();  // Fork后回收资源
     } else {
         /* Parent */
+        // 统计 fork 的时间
         server.stat_fork_time = ustime()-start;
         server.stat_fork_rate = (double) zmalloc_used_memory() * 1000000 / server.stat_fork_time / (1024*1024*1024); /* GB per second. */
         latencyAddSampleIfNeeded("fork",server.stat_fork_time/1000);
@@ -5501,6 +5503,7 @@ int main(int argc, char **argv) {
         moduleLoadFromQueue();
         ACLLoadUsersAtStartup();
         InitServerLast();
+        // 加载 AOF 和 RDB
         loadDataFromDisk();
         if (server.cluster_enabled) {
             if (verifyClusterConfigWithData() == C_ERR) {
