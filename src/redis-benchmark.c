@@ -374,7 +374,7 @@ static void freeAllClients(void) {
         ln = next;
     }
 }
-
+// 使用旧的客户端，也就是旧的连接，发送新的请求
 static void resetClient(client c) {
     aeEventLoop *el = CLIENT_GET_EVENTLOOP(c);
     aeDeleteFileEvent(el,c->context->fd,AE_WRITABLE);
@@ -449,7 +449,7 @@ static void clientDone(client c) {
         freeClient(c);           // 真正的释放，liveclients++
     }
 }
-
+// 可读事件的回调函数，用于处理请求
 static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     client c = privdata;
     void *reply = NULL;
@@ -460,6 +460,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     /* Calculate latency only for the first read event. This means that the
      * server already sent the reply and we need to parse it. Parsing overhead
      * is not part of the latency, so calculate it only once, here. */
+    // 计算延迟
     if (c->latency < 0) c->latency = ustime()-(c->start);
 
     // 从hiredis中读数据
@@ -581,7 +582,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         if (config.randomkeys) randomizeClientKey(c);
         if (config.cluster_mode && c->staglen > 0) setClusterKeyHashTag(c);
         atomicGet(config.slots_last_update, c->slots_last_update);
-        c->start = ustime();
+        c->start = ustime();  // 时间
         c->latency = -1;
     }
     if (sdslen(c->obuf) > c->written) {
@@ -595,7 +596,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         c->written += nwritten;
-        // 数据全都写到 Redis 客户端了，删除该事件，然后
+        // 数据全都写到 Redis 客户端了，删除该事件，然后 注册可读事件，处理响应
         if (sdslen(c->obuf) == c->written) {
             aeDeleteFileEvent(el,c->context->fd,AE_WRITABLE);
             aeCreateFileEvent(el,c->context->fd,AE_READABLE,readHandler,c);
@@ -952,6 +953,7 @@ static benchmarkThread *createBenchmarkThread(int index) {
     if (thread == NULL) return NULL;
     thread->index = index;
     thread->el = aeCreateEventLoop(1024*10);
+    // 每一个 Thread 都有一个 showThroughput 事件
     aeCreateTimeEvent(thread->el,1,showThroughput,NULL,NULL);
     return thread;
 }

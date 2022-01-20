@@ -3010,6 +3010,7 @@ void waitCommand(client *c) {
     long numreplicas, ackreplicas;
     long long offset = c->woff;
 
+    // 什么是写入 local ？
     if (server.masterhost) {
         addReplyError(c,"WAIT cannot be used with replica instances. Please also note that since Redis 4.0 if a replica is configured to be writable (which is not the default) writes to replicas are just local and are not propagated.");
         return;
@@ -3023,6 +3024,7 @@ void waitCommand(client *c) {
 
     /* First try without blocking at all. */
     ackreplicas = replicationCountAcksByOffset(c->woff);
+    // 大于 numreplicas 或者是 trasaction
     if (ackreplicas >= numreplicas || c->flags & CLIENT_MULTI) {
         addReplyLongLong(c,ackreplicas);
         return;
